@@ -510,6 +510,8 @@ async function scanCluster(
 
   // A fresh scan runs SCAN 0 on all primaries; resuming starts each node from its saved cursor.
   // Keys from every SCAN reply are kept even past the limit, since the cursor has already moved past them.
+  // So the batch size is approximate: the initial all-primaries SCAN alone can return up to COUNT keys
+  // per primary, and each node's in-flight SCAN can add up to COUNT more once the limit is reached.
   const startCursors: ScanCursors = payload.cursors ?? Object.fromEntries(
     (await client.customCommand(scanArgs("0"), { route: "allPrimaries" }) as ClusterScanResult[])
       .map(({ key: nodeAddress, value: [cursor, keys] }) => {

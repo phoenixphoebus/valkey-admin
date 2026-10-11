@@ -27,8 +27,11 @@ export function ScanAllModal({ open, onClose, params, pattern, onScan }: ScanAll
     setDraftDelayMs(params.delayMs)
   }, [params, open])
 
+  // Inputs are only clamped on blur, so a typed value can still be empty, negative or fractional here.
   const handleScan = () => {
-    onScan({ maxKeys: draftMaxKeys, delayMs: draftDelayMs })
+    const maxKeys = Number.isFinite(draftMaxKeys) && draftMaxKeys >= 1 ? Math.floor(draftMaxKeys) : params.maxKeys
+    const delayMs = Number.isFinite(draftDelayMs) && draftDelayMs >= 0 ? draftDelayMs : params.delayMs
+    onScan({ maxKeys, delayMs })
     onClose()
   }
 
