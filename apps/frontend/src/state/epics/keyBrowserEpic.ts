@@ -25,11 +25,16 @@ import { closeConnection, connectionBroken, deleteConnection } from "../valkey-f
 import { action$, select, selectMany } from "../middleware/rxjsMiddleware/rxjsMiddleware"
 import type { Store } from "@reduxjs/toolkit"
 
+/**
+ * Keeps only actions for the given connection.
+ */
 const forConnection = (connectionId: string) =>
   filter((action: { payload: { connectionId: string } }) => action.payload.connectionId === connectionId)
 
-// Scan all: request the next batch each time the previous one lands, pausing `delayMs` in between,
-// until every node is scanned, `maxKeys` are loaded, or something cancels it.
+/**
+ * Scan all: request the next batch each time the previous one lands, pausing `delayMs` in between,
+ * until every node is scanned, `maxKeys` are loaded, or something cancels it.
+ */
 const scanAllEpic = (store: Store) =>
   action$.pipe(
     select(scanAllRequested),
@@ -37,6 +42,9 @@ const scanAllEpic = (store: Store) =>
     // One Scan all per connection; repeat requests while one is running are ignored.
     mergeMap((group$) => group$.pipe(
       exhaustMap(({ payload: { connectionId, maxKeys, delayMs } }) => {
+        /**
+         * Requests the next batch, or stops Scan all when every node is scanned or `maxKeys` are loaded.
+         */
         const nextBatch = () => {
           const state = store.getState()
           if (!selectHasMoreKeys(connectionId)(state)) {
@@ -77,6 +85,9 @@ const scanAllEpic = (store: Store) =>
     ignoreElements(),
   )
 
+/**
+ * Forwards Key Browser requests to the server over the websocket, runs Scan all, and shows its result toasts.
+ */
 export const keyBrowserEpic = (store: Store) =>
   merge(
     scanAllEpic(store),

@@ -470,6 +470,10 @@ type ScanBatch = { keys: Set<string>; cursors: ScanCursors }
 // Each batch stops once it has collected roughly this many keys.
 const KEYS_PER_BATCH = 1000
 
+/**
+ * Runs one bounded SCAN batch on a standalone node, starting from `payload.cursors` or from 0.
+ * Returns the keys found and the cursor to resume from ("0" once the scan is complete).
+ */
 async function scanStandalone(client: GlideClient, payload: ScanPayload): Promise<ScanBatch> {
   const allKeys = new Set<string>()
 
@@ -495,11 +499,18 @@ type ClusterScanResult = {
   value:[string, string[]]
 }
 
+/**
+ * Builds a route that sends a command to the node at `host:port`.
+ */
 function routeToNode(nodeAddress: string): RouteOption {
   const [host, portStr] = nodeAddress.split(/:(?=[^:]+$)/) // split on last ":"
   return { route: { type: "routeByAddress", host, port: Number(portStr) } }
 }
 
+/**
+ * Runs one bounded SCAN batch across every primary, starting from `payload.cursors` or from 0 on all of them.
+ * Returns the keys found and each primary's cursor, keyed by node address ("0" once that node is done).
+ */
 async function scanCluster(
   client: GlideClusterClient,
   payload: ScanPayload & { limit?: number },
@@ -540,6 +551,11 @@ async function scanCluster(
 }
 
 const limit = pLimit(10) 
+/**
+ * Handles a Key Browser scan request: runs one SCAN batch, loads metadata for the keys found,
+ * and replies with the keys, the cursors to resume from, and whether they should be appended.
+ * Replies echo `scanId` so the client can ignore results from an older scan.
+ */
 export async function getKeys(
   client: GlideClient | GlideClusterClient,
   ws: WebSocket,

@@ -37,6 +37,9 @@ export const mockWebSocketState = (overrides?: object) => ({
   ...overrides,
 })
 
+/**
+ * Builds per-connection Key Browser state for tests; `overrides` replaces any field.
+ */
 export const mockKeyBrowserState = (overrides?: object) => ({
   keys: [],
   cursors: {},

@@ -168,6 +168,9 @@ function TreeNodeItem({ node, level, selectedKey, onKeyClick, loading }: TreeNod
   )
 }
 
+/**
+ * Renders keys as a tree grouped by `:`-separated segments, followed by an optional footer.
+ */
 export function KeyTree({ keys, selectedKey, onKeyClick, loading, footer }: KeyTreeProps) {
   const tree = keyTreeBuilder(keys)
 

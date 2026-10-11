@@ -61,6 +61,10 @@ interface KeyInfo {
   elements?: any;
 }
 
+/**
+ * Key Browser page: lists keys from a bounded SCAN, with search, type filter, Load more and Scan all,
+ * next to a details panel for the selected key.
+ */
 export function KeyBrowser() {
   const { id, clusterId } = useParams()
   const dispatch = useAppDispatch()
@@ -131,20 +135,31 @@ export function KeyBrowser() {
     }
   }, [id, dispatch])
 
+  /**
+   * Starts a fresh scan from cursor 0, replacing the list and cancelling any Scan all.
+   */
   const handleRefresh = () => {
     dispatch(getKeysRequested({ connectionId: id! }))
   }
 
-  // Resumes the current scan (same pattern) from where the last batch stopped.
+  /**
+   * Resumes the current scan (same pattern) from where the last batch stopped.
+   */
   const handleLoadMore = () => {
     dispatch(getKeysRequested({ connectionId: id!, pattern: activePattern, cursors, scanId }))
   }
 
+  /**
+   * Remembers the chosen Scan all settings and starts loading batches until done or the limit.
+   */
   const handleScanAll = (params: ScanAllParams) => {
     setScanAllParams(params)
     dispatch(scanAllRequested({ connectionId: id!, ...params }))
   }
 
+  /**
+   * Stops a running Scan all, keeping the keys loaded so far.
+   */
   const handleStopScanAll = () => {
     dispatch(scanAllStopped({ connectionId: id!, reason: "stopped" }))
   }

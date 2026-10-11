@@ -23,6 +23,9 @@ import {
 import { keyBrowserEpic } from "./keyBrowserEpic"
 import type { Store } from "@reduxjs/toolkit"
 
+/**
+ * Starts every epic against the store and logs any error that escapes them.
+ */
 export const registerEpics = (store: Store) => {
   merge(
     wsConnectionEpic(store),

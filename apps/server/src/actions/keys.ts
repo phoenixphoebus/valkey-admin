@@ -10,6 +10,10 @@ type GetKeysPayload = {
   scanId?: string | undefined;
 }
 
+/**
+ * Websocket handler for `getKeysRequested`: runs a scan batch on the connection's client, or replies with
+ * `getKeysFailed` when the connection is unknown.
+ */
 export const getKeysRequested = withDeps<Deps, void>(
   async ({ ws, clients, connectionId, action }) => {
     const connection = clients.get(connectionId)

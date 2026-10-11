@@ -27,7 +27,9 @@ interface KeyBrowserState {
   };
 }
 
-// Called per connection so each gets its own nested objects, not frozen shared ones.
+/**
+ * Called per connection so each gets its own nested objects, not frozen shared ones.
+ */
 export const createConnectionState = (): KeyBrowserState[string] => ({
   keys: [],
   cursors: {},
@@ -43,7 +45,9 @@ export const defaultConnectionState = createConnectionState()
 
 const initialState: KeyBrowserState = {}
 
-// Replies without a scanId (e.g. "Invalid connection Id") are treated as belonging to the current scan.
+/**
+ * Replies without a scanId (e.g. "Invalid connection Id") are treated as belonging to the current scan.
+ */
 const isCurrentScan = (connection: KeyBrowserState[string], scanId?: string) =>
   scanId === undefined || scanId === connection.scanId
 
@@ -52,6 +56,10 @@ const keyBrowserSlice = createSlice({
   initialState,
   reducers: {
     getKeysRequested: {
+      /**
+       * Starts a scan batch. A fresh scan resets the scan id and pattern and cancels Scan all;
+       * a batch with `cursors` resumes the current scan.
+       */
       reducer: (
         state,
         action: PayloadAction<{
@@ -78,7 +86,9 @@ const keyBrowserSlice = createSlice({
         }
         state[connectionId].error = null
       },
-      // A fresh scan gets a new id; resuming passes the id of the scan it continues.
+      /**
+       * A fresh scan gets a new id; resuming passes the id of the scan it continues.
+       */
       prepare: (payload: {
         connectionId: string;
         pattern?: string;
@@ -89,6 +99,9 @@ const keyBrowserSlice = createSlice({
         payload: { ...payload, scanId: payload.cursors && payload.scanId ? payload.scanId : nanoid() },
       }),
     },
+    /**
+     * Applies a batch from the current scan: appends (deduped) when resuming, replaces otherwise.
+     */
     getKeysFulfilled: (
       state,
       action: PayloadAction<{
@@ -115,6 +128,9 @@ const keyBrowserSlice = createSlice({
         state[connectionId].totalKeys = totalKeys
       }
     },
+    /**
+     * Records a failed batch from the current scan and stops Scan all.
+     */
     getKeysFailed: (
       state,
       action: PayloadAction<{
@@ -131,7 +147,9 @@ const keyBrowserSlice = createSlice({
         state[connectionId].error = error
       }
     },
-    // Keeps loading batches until the scan completes or `maxKeys` are loaded; see keyBrowserEpic.
+    /**
+     * Keeps loading batches until the scan completes or `maxKeys` are loaded; see keyBrowserEpic.
+     */
     scanAllRequested: (
       state,
       action: PayloadAction<{ connectionId: string; maxKeys: number; delayMs: number }>,
@@ -141,7 +159,9 @@ const keyBrowserSlice = createSlice({
         state[connectionId].scanAllRunning = true
       }
     },
-    // Stops Scan all, keeping the keys loaded so far.
+    /**
+     * Stops Scan all, keeping the keys loaded so far.
+     */
     scanAllStopped: (
       state,
       action: PayloadAction<{ connectionId: string; reason: "stopped" | "complete" | "limit" }>,

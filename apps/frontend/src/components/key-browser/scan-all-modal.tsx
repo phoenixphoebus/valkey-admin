@@ -18,6 +18,9 @@ interface ScanAllModalProps {
   onScan: (params: ScanAllParams) => void
 }
 
+/**
+ * Settings dialog for Scan all: the key limit and the delay between batches.
+ */
 export function ScanAllModal({ open, onClose, params, pattern, onScan }: ScanAllModalProps) {
   const [draftMaxKeys, setDraftMaxKeys] = useState(params.maxKeys)
   const [draftDelayMs, setDraftDelayMs] = useState(params.delayMs)
@@ -27,7 +30,10 @@ export function ScanAllModal({ open, onClose, params, pattern, onScan }: ScanAll
     setDraftDelayMs(params.delayMs)
   }, [params, open])
 
-  // Inputs are only clamped on blur, so a typed value can still be empty, negative or fractional here.
+  /**
+   * Starts Scan all with the drafted settings, falling back to the current ones when invalid.
+   * Inputs are only clamped on blur, so a typed value can still be empty, negative or fractional here.
+   */
   const handleScan = () => {
     const maxKeys = Number.isFinite(draftMaxKeys) && draftMaxKeys >= 1 ? Math.floor(draftMaxKeys) : params.maxKeys
     const delayMs = Number.isFinite(draftDelayMs) && draftDelayMs >= 0 ? draftDelayMs : params.delayMs

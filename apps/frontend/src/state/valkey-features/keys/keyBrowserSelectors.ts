@@ -9,22 +9,39 @@ export const selectKeys = (id: string) => (state: RootState) =>
 export const selectTotalKeys = (id: string) => (state: RootState) =>
   R.pathOr(defaultConnectionState.keys, [VALKEY.KEYS.name, id, "totalKeys"], state)
 
+/**
+ * SCAN cursor per node from the last batch; empty before the first scan.
+ */
 export const selectCursors = (id: string) => (state: RootState) =>
   R.pathOr(defaultConnectionState.cursors, [VALKEY.KEYS.name, id, "cursors"], state)
 
-// True while at least one node still has keys left to scan.
+/**
+ * True while at least one node still has keys left to scan.
+ */
 export const selectHasMoreKeys = (id: string) => (state: RootState) =>
   Object.values(selectCursors(id)(state)).some((cursor) => cursor !== "0")
 
+/**
+ * Pattern of the current scan, reused by Load more and Scan all.
+ */
 export const selectPattern = (id: string) => (state: RootState) =>
   R.pathOr<string | undefined>(defaultConnectionState.pattern, [VALKEY.KEYS.name, id, "pattern"], state)
 
+/**
+ * Whether a Load more or Scan all batch is in flight.
+ */
 export const selectLoadingMore = (id: string) => (state: RootState) =>
   R.pathOr(defaultConnectionState.loadingMore, [VALKEY.KEYS.name, id, "loadingMore"], state)
 
+/**
+ * Id of the current scan; replies carrying a different id are stale.
+ */
 export const selectScanId = (id: string) => (state: RootState) =>
   R.pathOr<string | undefined>(defaultConnectionState.scanId, [VALKEY.KEYS.name, id, "scanId"], state)
 
+/**
+ * Whether Scan all is running for this connection.
+ */
 export const selectScanAllRunning = (id: string) => (state: RootState) =>
   R.pathOr(defaultConnectionState.scanAllRunning, [VALKEY.KEYS.name, id, "scanAllRunning"], state)
 
