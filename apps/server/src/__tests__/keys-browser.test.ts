@@ -187,12 +187,11 @@ describe("getKeyInfo", () => {
       assert.strictEqual(result.name, "mystream")
       assert.strictEqual(result.type, "stream")
       assert.strictEqual(result.collectionSize, 2)
-      assert.ok(Array.isArray(result.elements))
-      // Stream entries are nested arrays: [[id, [field, value, ...]], ...]
-      const elements = result.elements as string[][]
-      assert.strictEqual(elements.length, 2)
-      assert.ok(Array.isArray(elements[0]))
-      assert.ok(Array.isArray(elements[1]))
+      // Plain RESP entries are normalized to the GLIDE shape: { key: id, value: [[field, value], ...] }
+      assert.deepStrictEqual(result.elements, [
+        { key: "1234567890-0", value: [["field1", "value1"], ["field2", "value2"]] },
+        { key: "1234567891-0", value: [["field3", "value3"]] },
+      ])
     })
 
   })

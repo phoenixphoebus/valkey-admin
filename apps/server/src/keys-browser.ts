@@ -161,10 +161,10 @@ async function getPaginatedListInfo(
   }
 }
 
-type StreamEntry = { key: string; value: [string, string][] } | [string, string[]]
+type StreamEntry = { key: string; value: [string, string][] }
 
 // GLIDE returns entries as { key: id, value: [[field, value], ...] }; plain RESP arrays are [id, [field, value, ...]].
-// An entry is flagged binary if any field or value is.
+// Both are normalized to the GLIDE shape. An entry is flagged binary if any field or value is.
 function decodeStreamEntry(raw: GlideReturnType): { value: StreamEntry; id: string; isBinary: boolean } {
   let isBinary = false
   const decode = (part: GlideReturnType): string => {
@@ -176,8 +176,11 @@ function decodeStreamEntry(raw: GlideReturnType): { value: StreamEntry; id: stri
   if (Array.isArray(raw)) {
     const [rawId, rawFields] = raw as [GlideReturnType, GlideReturnType[]]
     const id = toText(rawId)
-    const fields = rawFields.map(decode)
-    return { value: [id, fields], id, isBinary }
+    const fields: [string, string][] = []
+    for (let i = 0; i < rawFields.length; i += 2) {
+      fields.push([decode(rawFields[i]), decode(rawFields[i + 1])])
+    }
+    return { value: { key: id, value: fields }, id, isBinary }
   }
 
   const { key, value } = raw as { key: GlideReturnType; value: GlideReturnType[][] }
