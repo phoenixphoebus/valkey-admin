@@ -20,6 +20,9 @@ interface KeyDetailsStreamProps {
   readOnly: boolean;
 }
 
+/**
+ * Shows a stream's entries and their fields; entries with binary data are badged.
+ */
 export default function KeyDetailsStream(
   { selectedKeyInfo }: KeyDetailsStreamProps,
 ) {

@@ -37,6 +37,9 @@ interface NewField {
   value: string;
 }
 
+/**
+ * Shows and edits a hash's fields; fields with binary data are badged and read-only.
+ */
 export default function KeyDetailsHash(
   { selectedKey, selectedKeyInfo, connectionId, readOnly = false }: KeyDetailsHashProps,
 ) {

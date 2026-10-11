@@ -80,6 +80,9 @@ interface keyDetailsProps {
   readOnly: boolean;
 }
 
+/**
+ * Details panel for the selected key: header, TTL and size, and the type-specific value view.
+ */
 export default function KeyDetails({ selectedKey, selectedKeyInfo, connectionId, setSelectedKey, readOnly = false }: keyDetailsProps) {
   const dispatch = useAppDispatch()
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)

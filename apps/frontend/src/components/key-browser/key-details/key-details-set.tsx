@@ -31,6 +31,9 @@ interface NewItem {
   value: string;
 }
 
+/**
+ * Shows and edits a set's members; binary members are badged and read-only.
+ */
 export default function KeyDetailsSet(
   { selectedKey, selectedKeyInfo, connectionId, readOnly = false }: KeyDetailsSetProps,
 ) {

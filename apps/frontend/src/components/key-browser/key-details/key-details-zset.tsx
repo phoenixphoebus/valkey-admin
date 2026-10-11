@@ -27,6 +27,9 @@ interface KeyDetailsZSetProps {
   readOnly: boolean;
 }
 
+/**
+ * Shows and edits a sorted set's members and scores; binary members are badged and read-only.
+ */
 export default function KeyDetailsZSet(
   { selectedKey, selectedKeyInfo, connectionId, readOnly = false }: KeyDetailsZSetProps,
 ) {

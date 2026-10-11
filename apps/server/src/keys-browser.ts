@@ -33,10 +33,16 @@ interface EnrichedKeyInfo {
   binaryIndexes?: number[]; // indexes into collection `elements` that hold binary data, shown escaped.
 }
 
-// Valkey strings are binary-safe, so a value may not be valid UTF-8. Strict decoding tells
-// text apart from binary: binary is escaped for display and flagged so edits can be blocked.
+/**
+ * Valkey strings are binary-safe, so a value may not be valid UTF-8. Strict decoding tells
+ * text apart from binary: binary is escaped for display and flagged so edits can be blocked.
+ */
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
 
+/**
+ * Decodes a reply as UTF-8 text, falling back to `\xNN` escapes when the bytes aren't valid UTF-8.
+ * Numbers and booleans are stringified; an Error reply is rethrown.
+ */
 function decodeToStringValue(raw: GlideReturnType): { value: string; isBinary: boolean } {
   if (typeof raw === "string") return { value: raw, isBinary: false }
   if (typeof raw === "number" || typeof raw === "bigint" || typeof raw === "boolean") {
@@ -56,17 +62,23 @@ function decodeToStringValue(raw: GlideReturnType): { value: string; isBinary: b
   }
 }
 
-// Cursors, stream IDs and scores are always ASCII, so they are read as plain text.
+/**
+ * Cursors, stream IDs and scores are always ASCII, so they are read as plain text.
+ */
 function toText(raw: GlideReturnType): string {
   return decodeToStringValue(raw).value
 }
 
-// Identifies an element by its raw bytes; escaped binary text isn't unique, so it can't be used for dedupe.
+/**
+ * Identifies an element by its raw bytes; escaped binary text isn't unique, so it can't be used for dedupe.
+ */
 function rawIdentity(raw: GlideReturnType): string {
   return Buffer.isBuffer(raw) ? raw.toString("latin1") : String(raw)
 }
 
-// Splits decoded elements into the `elements` payload plus the indexes of the binary ones.
+/**
+ * Splits decoded elements into the `elements` payload plus the indexes of the binary ones.
+ */
 function withBinaryIndexes<T>(decoded: { value: T; isBinary: boolean }[]): { elements: T[]; binaryIndexes?: number[] } {
   const binaryIndexes = decoded.flatMap(({ isBinary }, i) => (isBinary ? [i] : []))
   return {
@@ -75,6 +87,10 @@ function withBinaryIndexes<T>(decoded: { value: T; isBinary: boolean }[]): { ele
   }
 }
 
+/**
+ * Loads every element of a set or hash with SSCAN/HSCAN, deduping by raw bytes.
+ * Hash fields become `{ key, value }` pairs; binary elements are escaped and listed in `binaryIndexes`.
+ */
 async function getScanKeyInfo(
   client: GlideClient | GlideClusterClient,
   keyInfo: EnrichedKeyInfo,
@@ -129,6 +145,9 @@ async function getScanKeyInfo(
   }
 }
 
+/**
+ * Loads a list with LRANGE one page at a time; binary elements are escaped and listed in `binaryIndexes`.
+ */
 async function getPaginatedListInfo(
   client: GlideClient | GlideClusterClient,
   keyInfo: EnrichedKeyInfo,
@@ -163,8 +182,10 @@ async function getPaginatedListInfo(
 
 type StreamEntry = { key: string; value: [string, string][] }
 
-// GLIDE returns entries as { key: id, value: [[field, value], ...] }; plain RESP arrays are [id, [field, value, ...]].
-// Both are normalized to the GLIDE shape. An entry is flagged binary if any field or value is.
+/**
+ * GLIDE returns entries as { key: id, value: [[field, value], ...] }; plain RESP arrays are [id, [field, value, ...]].
+ * Both are normalized to the GLIDE shape. An entry is flagged binary if any field or value is.
+ */
 function decodeStreamEntry(raw: GlideReturnType): { value: StreamEntry; id: string; isBinary: boolean } {
   let isBinary = false
   const decode = (part: GlideReturnType): string => {
@@ -189,6 +210,10 @@ function decodeStreamEntry(raw: GlideReturnType): { value: StreamEntry; id: stri
   return { value: { key: id, value: fields }, id, isBinary }
 }
 
+/**
+ * Loads a stream with XRANGE one page at a time, resuming after the last entry ID.
+ * Entries holding binary fields or values are escaped and listed in `binaryIndexes`.
+ */
 async function getPaginatedStreamInfo(
   client: GlideClient | GlideClusterClient,
   keyInfo: EnrichedKeyInfo,
@@ -230,16 +255,24 @@ async function getPaginatedStreamInfo(
 type ZSetMember = { key: string; value: string | number }
 type RawZSetMember = { key: GlideString; value: GlideReturnType }
 
-// Scores arrive as numbers (RESP3 doubles) or, from older servers, as bulk strings.
+/**
+ * Scores arrive as numbers (RESP3 doubles) or, from older servers, as bulk strings.
+ */
 function decodeScore(raw: GlideReturnType): string | number {
   return Buffer.isBuffer(raw) ? toText(raw) : raw as string | number
 }
 
-// Builds an exclusive BYLEX bound, keeping binary members as raw bytes so they still match.
+/**
+ * Builds an exclusive BYLEX bound, keeping binary members as raw bytes so they still match.
+ */
 function exclusiveLexBound(member: GlideString): GlideString {
   return Buffer.isBuffer(member) ? Buffer.concat([Buffer.from("("), member]) : `(${member}`
 }
 
+/**
+ * Loads a sorted set by score one page at a time, draining runs of tied scores with BYLEX.
+ * Members are deduped by raw bytes; binary members are escaped and listed in `binaryIndexes`.
+ */
 async function getPaginatedZSetInfo(
   client: GlideClient | GlideClusterClient,
   keyInfo: EnrichedKeyInfo,
@@ -392,6 +425,9 @@ async function getPaginatedJsonInfo(
   }
 }
 
+/**
+ * Reads a whole value in one command (e.g. GET); binary values are escaped and flagged with `isBinary`.
+ */
 async function getFullKeyInfo(
   client: GlideClient | GlideClusterClient,
   keyInfo: EnrichedKeyInfo,
@@ -1021,6 +1057,10 @@ export async function addKey(
 
 // functions for updatin/editing different key types
 // Note : the update and add functions are quite similar MAYBE can be refactored later
+/**
+ * Overwrites a string key, keeping its TTL unless a new one is given.
+ * Refuses keys holding binary data, since saving the escaped text would corrupt them.
+ */
 async function updateStringKey(
   client: GlideClient | GlideClusterClient,
   key: string,

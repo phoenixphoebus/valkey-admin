@@ -31,6 +31,9 @@ interface NewItem {
   value: string;
 }
 
+/**
+ * Shows and edits a list's elements; binary elements are badged and read-only.
+ */
 export default function KeyDetailsList(
   { selectedKey, selectedKeyInfo, connectionId, readOnly = false }: KeyDetailsListProps,
 ) {
