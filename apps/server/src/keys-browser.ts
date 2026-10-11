@@ -451,17 +451,31 @@ export async function getKeyInfo(
   }
 }
 
-async function scanStandalone(
-  client: GlideClient,
-  payload: {
-    connectionId: string;
-    pattern?: string;
-    count?: number;
-  }, 
-): Promise<Set<string>> {
+// Cursor key used for the single node of a standalone connection.
+const STANDALONE_CURSOR_KEY = "standalone"
+
+// SCAN position per node ("host:port" in cluster mode). A cursor of "0" means that node is fully scanned.
+type ScanCursors = Record<string, string>
+
+type ScanPayload = {
+  connectionId: string;
+  pattern?: string;
+  count?: number;
+  cursors?: ScanCursors; // resume from these instead of starting a fresh scan
+  scanId?: string; // echoed back so the client can ignore replies from an older scan
+}
+
+type ScanBatch = { keys: Set<string>; cursors: ScanCursors }
+
+// Each batch stops once it has collected roughly this many keys.
+const KEYS_PER_BATCH = 1000
+
+async function scanStandalone(client: GlideClient, payload: ScanPayload): Promise<ScanBatch> {
   const allKeys = new Set<string>()
-    
-  let cursor = "0"
+
+  let cursor = payload.cursors?.[STANDALONE_CURSOR_KEY] ?? "0"
+  if (payload.cursors && cursor === "0") return { keys: allKeys, cursors: { [STANDALONE_CURSOR_KEY]: "0" } }
+
   do {
     const scanResult = (await client.customCommand(
       buildScanCommandArgs({ cursor, pattern: payload.pattern, count: payload.count }),
@@ -471,9 +485,9 @@ async function scanStandalone(
 
     cursor = newCursor
     keys.forEach((key) => {allKeys.add(key)})
-  } while (allKeys.size < 1000 && cursor !== "0")
+  } while (allKeys.size < KEYS_PER_BATCH && cursor !== "0")
 
-  return allKeys
+  return { keys: allKeys, cursors: { [STANDALONE_CURSOR_KEY]: cursor } }
 }
 
 type ClusterScanResult = {
@@ -481,81 +495,61 @@ type ClusterScanResult = {
   value:[string, string[]]
 }
 
+function routeToNode(nodeAddress: string): RouteOption {
+  const [host, portStr] = nodeAddress.split(/:(?=[^:]+$)/) // split on last ":"
+  return { route: { type: "routeByAddress", host, port: Number(portStr) } }
+}
+
 async function scanCluster(
   client: GlideClusterClient,
-  payload: {
-    connectionId: string;
-    pattern?: string;
-    count?: number;
-    limit?: number; 
-  },
-): Promise<Set<string>> {
-
-  const routeOption: RouteOption = { route: "allPrimaries" }
+  payload: ScanPayload & { limit?: number },
+): Promise<ScanBatch> {
   const allKeys = new Set<string>()
-  const limit = payload.limit ?? 1000
+  const limit = payload.limit ?? KEYS_PER_BATCH
+  const scanArgs = (cursor: string) => buildScanCommandArgs({ cursor, pattern: payload.pattern, count: payload.count })
 
-  // Run initial SCAN 0 on all primaries
-  const scanClusterResult = await client.customCommand(
-    buildScanCommandArgs({
-      cursor: "0",
-      pattern: payload.pattern,
-      count: payload.count,
-    }),
-    routeOption,
-  ) as ClusterScanResult[]
+  // A fresh scan runs SCAN 0 on all primaries; resuming starts each node from its saved cursor.
+  // Keys from every SCAN reply are kept even past the limit, since the cursor has already moved past them.
+  const startCursors: ScanCursors = payload.cursors ?? Object.fromEntries(
+    (await client.customCommand(scanArgs("0"), { route: "allPrimaries" }) as ClusterScanResult[])
+      .map(({ key: nodeAddress, value: [cursor, keys] }) => {
+        keys.forEach((k) => allKeys.add(k))
+        return [nodeAddress, cursor]
+      }),
+  )
 
+  const cursors: ScanCursors = { ...startCursors }
   await Promise.all(
-    scanClusterResult.map(async ({ key: nodeAddress, value }) => {
-      let cursor = value[0]
-      const keys = value[1]
-
-      keys.forEach((k) => {
-        if (allKeys.size < limit) allKeys.add(k)
-      })
-
-      const [host, portStr] = nodeAddress.split(/:(?=[^:]+$)/) // split on last ":"
-      const nodeRouteOption: RouteOption = {
-        route: {
-          type: "routeByAddress",
-          host,
-          port: Number(portStr),
-        },
-      }
-      while (cursor !== "0" && allKeys.size < limit) {
+    Object.keys(cursors).map(async (nodeAddress) => {
+      const nodeRouteOption = routeToNode(nodeAddress)
+      while (cursors[nodeAddress] !== "0" && allKeys.size < limit) {
         const [nextCursor, newKeys] = await client.customCommand(
-          buildScanCommandArgs({
-            cursor,
-            pattern: payload.pattern,
-            count: payload.count,
-          }),
+          scanArgs(cursors[nodeAddress]),
           nodeRouteOption,
         ) as [string, string[]]
 
-        cursor = nextCursor
-        newKeys.forEach((k) => { if (allKeys.size < limit) allKeys.add(k) })
+        cursors[nodeAddress] = nextCursor
+        newKeys.forEach((k) => allKeys.add(k))
       }
     }),
   )
 
-  return allKeys
+  return { keys: allKeys, cursors }
 }
 
 const limit = pLimit(10) 
 export async function getKeys(
   client: GlideClient | GlideClusterClient,
   ws: WebSocket,
-  payload: {
-    connectionId: string;
-    pattern?: string;
-    count?: number;
-  },
+  payload: ScanPayload,
 ) {
-  const { connectionId } = payload
+  const { connectionId, scanId } = payload
   try {
     const totalKeys = await client.customCommand(["DBSIZE"])
-    const allKeys = client instanceof GlideClusterClient ? await scanCluster(client, payload) : await scanStandalone(client, payload)
-    const keyList = [...allKeys]
+    const { keys, cursors } = client instanceof GlideClusterClient
+      ? await scanCluster(client, payload)
+      : await scanStandalone(client, payload)
+    const keyList = [...keys]
 
     const metadata = await fetchKeyMetadataBatch(client, keyList)
 
@@ -577,6 +571,10 @@ export async function getKeys(
           connectionId: connectionId,
           keys: enrichedKeys,
           totalKeys,
+          cursors,
+          // A resumed scan adds to the keys already shown; a fresh scan replaces them.
+          append: Boolean(payload.cursors),
+          scanId,
         },
       }),
     )
@@ -589,6 +587,7 @@ export async function getKeys(
         payload: {
           connectionId: connectionId,
           error: err instanceof Error ? err.message : String(err),
+          scanId,
         },
       }),
     )

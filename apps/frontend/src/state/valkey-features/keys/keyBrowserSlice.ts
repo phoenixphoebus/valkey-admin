@@ -1,4 +1,4 @@
-import { createSlice, type PayloadAction } from "@reduxjs/toolkit"
+import { createSlice, nanoid, type PayloadAction } from "@reduxjs/toolkit"
 
 interface KeyInfo {
   name: string;
@@ -14,8 +14,13 @@ interface KeyInfo {
 interface KeyBrowserState {
   [connectionId: string]: {
     keys: KeyInfo[];
-    cursor: string;
+    // SCAN cursor per node from the last batch; "0" means that node is fully scanned.
+    cursors: Record<string, string>;
+    pattern?: string; // pattern of the current scan, reused when loading more
+    scanId?: string; // identifies the current scan; replies from an older scan are ignored
     loading: boolean;
+    loadingMore: boolean;
+    scanAllRunning: boolean;
     error: string | null;
     keyTypeLoading: { [key: string]: boolean };
     totalKeys: number;
@@ -25,8 +30,10 @@ interface KeyBrowserState {
 // Called per connection so each gets its own nested objects, not frozen shared ones.
 export const createConnectionState = (): KeyBrowserState[string] => ({
   keys: [],
-  cursor: "0",
+  cursors: {},
   loading: false,
+  loadingMore: false,
+  scanAllRunning: false,
   error: null,
   keyTypeLoading: {},
   totalKeys: 0,
@@ -36,39 +43,75 @@ export const defaultConnectionState = createConnectionState()
 
 const initialState: KeyBrowserState = {}
 
+// Replies without a scanId (e.g. "Invalid connection Id") are treated as belonging to the current scan.
+const isCurrentScan = (connection: KeyBrowserState[string], scanId?: string) =>
+  scanId === undefined || scanId === connection.scanId
+
 const keyBrowserSlice = createSlice({
   name: "keyBrowser",
   initialState,
   reducers: {
-    getKeysRequested: (
-      state,
-      action: PayloadAction<{
+    getKeysRequested: {
+      reducer: (
+        state,
+        action: PayloadAction<{
+          connectionId: string;
+          pattern?: string;
+          count?: number;
+          cursors?: Record<string, string>; // set to resume the current scan (Load more)
+          scanId: string;
+        }>,
+      ) => {
+        const { connectionId, pattern, cursors, scanId } = action.payload
+        if (!state[connectionId]) {
+          state[connectionId] = createConnectionState()
+        }
+        if (cursors) {
+          state[connectionId].loadingMore = true
+        } else {
+          // A fresh scan (open, Refresh, search) supersedes any batch or Scan all still running.
+          state[connectionId].loading = true
+          state[connectionId].loadingMore = false
+          state[connectionId].scanAllRunning = false
+          state[connectionId].pattern = pattern
+          state[connectionId].scanId = scanId
+        }
+        state[connectionId].error = null
+      },
+      // A fresh scan gets a new id; resuming passes the id of the scan it continues.
+      prepare: (payload: {
         connectionId: string;
         pattern?: string;
         count?: number;
-      }>,
-    ) => {
-      const { connectionId } = action.payload
-      if (!state[connectionId]) {
-        state[connectionId] = createConnectionState()
-      }
-      state[connectionId].loading = true
-      state[connectionId].error = null
+        cursors?: Record<string, string>;
+        scanId?: string;
+      }) => ({
+        payload: { ...payload, scanId: payload.cursors && payload.scanId ? payload.scanId : nanoid() },
+      }),
     },
     getKeysFulfilled: (
       state,
       action: PayloadAction<{
         connectionId: string;
         keys: KeyInfo[];
-        cursor: string;
+        cursors: Record<string, string>;
         totalKeys: number;
+        append?: boolean;
+        scanId?: string;
       }>,
     ) => {
-      const { connectionId, keys, cursor, totalKeys } = action.payload
-      if (state[connectionId]) {
+      const { connectionId, keys, cursors, totalKeys, append, scanId } = action.payload
+      if (state[connectionId] && isCurrentScan(state[connectionId], scanId)) {
         state[connectionId].loading = false
-        state[connectionId].keys = keys
-        state[connectionId].cursor = cursor
+        state[connectionId].loadingMore = false
+        if (append) {
+          // SCAN can return a key more than once, so skip keys already in the list.
+          const known = new Set(state[connectionId].keys.map((k) => k.name))
+          state[connectionId].keys.push(...keys.filter((k) => !known.has(k.name)))
+        } else {
+          state[connectionId].keys = keys
+        }
+        state[connectionId].cursors = cursors
         state[connectionId].totalKeys = totalKeys
       }
     },
@@ -77,12 +120,35 @@ const keyBrowserSlice = createSlice({
       action: PayloadAction<{
         connectionId: string;
         error: string;
+        scanId?: string;
       }>,
     ) => {
-      const { connectionId, error } = action.payload
-      if (state[connectionId]) {
+      const { connectionId, error, scanId } = action.payload
+      if (state[connectionId] && isCurrentScan(state[connectionId], scanId)) {
         state[connectionId].loading = false
+        state[connectionId].loadingMore = false
+        state[connectionId].scanAllRunning = false
         state[connectionId].error = error
+      }
+    },
+    // Keeps loading batches until the scan completes or `maxKeys` are loaded; see keyBrowserEpic.
+    scanAllRequested: (
+      state,
+      action: PayloadAction<{ connectionId: string; maxKeys: number; delayMs: number }>,
+    ) => {
+      const { connectionId } = action.payload
+      if (state[connectionId]) {
+        state[connectionId].scanAllRunning = true
+      }
+    },
+    // Stops Scan all, keeping the keys loaded so far.
+    scanAllStopped: (
+      state,
+      action: PayloadAction<{ connectionId: string; reason: "stopped" | "complete" | "limit" }>,
+    ) => {
+      const { connectionId } = action.payload
+      if (state[connectionId]) {
+        state[connectionId].scanAllRunning = false
       }
     },
     getKeyTypeRequested: (
@@ -287,6 +353,8 @@ export const {
   getKeysRequested,
   getKeysFulfilled,
   getKeysFailed,
+  scanAllRequested,
+  scanAllStopped,
   getKeyTypeRequested,
   getKeyTypeFulfilled,
   getKeyTypeFailed,

@@ -16,7 +16,12 @@ Navigate through your keyspace with an intuitive interface that supports filteri
 ### Browsing Keys
 
 - **Tree View**: Navigate keys organized by namespace separators (`:`)
-- **Pagination**: Handle large keyspaces efficiently
+- **Load more**: Keys are scanned in batches of about 1,000. Click **Load more** at the bottom of the list to resume the scan and add the next batch. The button disappears once every node has been fully scanned. Refresh starts a new scan from the beginning.
+- **Scan all**: Click **Scan all...** to keep loading batches automatically. Before it starts you can set:
+  - **Max Keys** (default 50,000): stop once this many keys are loaded. The last batch can go over by up to about 1,000 keys.
+  - **Delay Between Batches** (default 100 ms): pause between batches to limit load on the server.
+
+  A status line shows keys loaded against the database size (`DBSIZE`) and, in cluster mode, how many nodes are fully scanned. Click **Stop** to end the scan and keep the keys loaded so far. Scan all never starts on its own. Refresh, a new search, leaving the Key Browser, or disconnecting cancels it.
 
 ### Search and Filter
 
@@ -28,6 +33,8 @@ user:*          # All keys starting with "user:"
 *:session       # All keys ending with ":session"
 user:*:cache    # Keys matching the pattern
 ```
+
+When a pattern matches more than one batch of keys, **Load more** and **Scan all** continue the search with the same pattern.
 
 #### Type Filtering
 

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { ChevronRight, ChevronDown, Key, Database, Hourglass } from "lucide-react"
 import { convertTTL } from "@common/src/ttl-conversion"
 import { formatBytes } from "@common/src/bytes-conversion"
@@ -29,6 +29,7 @@ interface KeyTreeProps {
   selectedKey: string | null
   onKeyClick: (keyName: string) => void
   loading: boolean
+  footer?: ReactNode // rendered after the keys, inside the scroll area
 }
 
 interface TreeNodeItemProps {
@@ -167,7 +168,7 @@ function TreeNodeItem({ node, level, selectedKey, onKeyClick, loading }: TreeNod
   )
 }
 
-export function KeyTree({ keys, selectedKey, onKeyClick, loading }: KeyTreeProps) {
+export function KeyTree({ keys, selectedKey, onKeyClick, loading, footer }: KeyTreeProps) {
   const tree = keyTreeBuilder(keys)
 
   return (
@@ -187,6 +188,7 @@ export function KeyTree({ keys, selectedKey, onKeyClick, loading }: KeyTreeProps
           selectedKey={selectedKey}
         />
       ))}
+      {footer}
     </div>
   )
 }

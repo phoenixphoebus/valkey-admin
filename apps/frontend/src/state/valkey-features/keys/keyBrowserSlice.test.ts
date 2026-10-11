@@ -50,10 +50,34 @@ describe("keyBrowserSlice", () => {
       expect(state["conn-1"].loading).toBe(true)
       expect(state["conn-1"].error).toBeNull()
     })
+
+    it("should remember the pattern of a fresh scan", () => {
+      const state = keyBrowserReducer(
+        initialState,
+        getKeysRequested({ connectionId: "conn-1", pattern: "user:*" }),
+      )
+
+      expect(state["conn-1"].pattern).toBe("user:*")
+    })
+
+    it("should set loadingMore, not loading, when resuming from cursors", () => {
+      const previousState = {
+        "conn-1": { ...defaultConnectionState, pattern: "user:*" },
+      }
+
+      const state = keyBrowserReducer(
+        previousState,
+        getKeysRequested({ connectionId: "conn-1", pattern: "user:*", cursors: { standalone: "42" } }),
+      )
+
+      expect(state["conn-1"].loadingMore).toBe(true)
+      expect(state["conn-1"].loading).toBe(false)
+      expect(state["conn-1"].pattern).toBe("user:*")
+    })
   })
 
   describe("getKeysFulfilled", () => {
-    it("should store keys, cursor, totalKeys and set loading to false", () => {
+    it("should store keys, cursors, totalKeys and set loading to false", () => {
       const previousState = {
         "conn-1": {
           ...defaultConnectionState,
@@ -71,15 +95,61 @@ describe("keyBrowserSlice", () => {
         getKeysFulfilled({
           connectionId: "conn-1",
           keys,
-          cursor: "123",
+          cursors: { standalone: "123" },
           totalKeys: 100,
         }),
       )
 
       expect(state["conn-1"].loading).toBe(false)
       expect(state["conn-1"].keys).toEqual(keys)
-      expect(state["conn-1"].cursor).toBe("123")
+      expect(state["conn-1"].cursors).toEqual({ standalone: "123" })
       expect(state["conn-1"].totalKeys).toBe(100)
+    })
+
+    it("should append new keys and skip duplicates when resuming a scan", () => {
+      const previousState = {
+        "conn-1": {
+          ...defaultConnectionState,
+          keys: [{ name: "key1" }, { name: "key2" }],
+          loadingMore: true,
+        },
+      }
+
+      const state = keyBrowserReducer(
+        previousState,
+        getKeysFulfilled({
+          connectionId: "conn-1",
+          keys: [{ name: "key2" }, { name: "key3" }],
+          cursors: { standalone: "0" },
+          totalKeys: 3,
+          append: true,
+        }),
+      )
+
+      expect(state["conn-1"].loadingMore).toBe(false)
+      expect(state["conn-1"].keys.map((k) => k.name)).toEqual(["key1", "key2", "key3"])
+      expect(state["conn-1"].cursors).toEqual({ standalone: "0" })
+    })
+
+    it("should replace keys on a fresh scan", () => {
+      const previousState = {
+        "conn-1": {
+          ...defaultConnectionState,
+          keys: [{ name: "old" }],
+        },
+      }
+
+      const state = keyBrowserReducer(
+        previousState,
+        getKeysFulfilled({
+          connectionId: "conn-1",
+          keys: [{ name: "new" }],
+          cursors: { standalone: "0" },
+          totalKeys: 1,
+        }),
+      )
+
+      expect(state["conn-1"].keys).toEqual([{ name: "new" }])
     })
   })
 
@@ -538,7 +608,7 @@ describe("keyBrowserSlice", () => {
         getKeysFulfilled({
           connectionId: "conn-1",
           keys: [{ name: "key1" }],
-          cursor: "0",
+          cursors: {},
           totalKeys: 1,
         }),
       )
@@ -548,7 +618,7 @@ describe("keyBrowserSlice", () => {
         getKeysFulfilled({
           connectionId: "conn-2",
           keys: [{ name: "key2" }, { name: "key3" }],
-          cursor: "0",
+          cursors: {},
           totalKeys: 2,
         }),
       )

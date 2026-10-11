@@ -703,6 +703,62 @@ describe("getKeys", () => {
       assert.strictEqual(sentMessage.type, VALKEY.KEYS.getKeysFulfilled)
       assert.strictEqual(sentMessage.payload.connectionId, "conn-123")
       assert.ok(Array.isArray(sentMessage.payload.keys))
+      assert.deepStrictEqual(sentMessage.payload.cursors, { standalone: "0" })
+      assert.strictEqual(sentMessage.payload.append, false)
+    })
+  })
+
+  describe("resumable scan", () => {
+    // SCAN replies keyed by the cursor they were requested with; each page holds 600 keys.
+    const pages: Record<string, [string, string[]]> = {
+      "0": ["7", Array.from({ length: 600 }, (_, i) => `a${i}`)],
+      "7": ["9", Array.from({ length: 600 }, (_, i) => `b${i}`)],
+      "9": ["0", ["c0", "b0"]],
+    }
+    const createScanClient = () => ({
+      customCommand: mock.fn(async (cmd: string[]) => {
+        if (cmd[0] === "SCAN") return pages[cmd[1]]
+        if (cmd[0] === "DBSIZE") return 1202
+        return null
+      }),
+      exec: mock.fn(async (batch: any) => batch.commands.map(() => null)),
+    })
+    const scannedCursors = (client: ReturnType<typeof createScanClient>) =>
+      client.customCommand.mock.calls.map((c) => c.arguments[0]).filter((cmd) => cmd[0] === "SCAN").map((cmd) => cmd[1])
+
+    it("should stop after a bounded batch and return the cursor to resume from", async () => {
+      const client = createScanClient()
+
+      await import("../keys-browser").then((m) => m.getKeys(client as any, mockWs, { connectionId: "conn-123" }))
+
+      const { payload } = JSON.parse(messages[0])
+      assert.strictEqual(payload.keys.length, 1200)
+      assert.deepStrictEqual(payload.cursors, { standalone: "9" })
+      assert.deepStrictEqual(scannedCursors(client), ["0", "7"])
+    })
+
+    it("should resume from the given cursor and mark the batch as an append", async () => {
+      const client = createScanClient()
+
+      await import("../keys-browser").then((m) =>
+        m.getKeys(client as any, mockWs, { connectionId: "conn-123", pattern: "*", cursors: { standalone: "9" } }))
+
+      const { payload } = JSON.parse(messages[0])
+      assert.deepStrictEqual(payload.keys.map((k: any) => k.name), ["c0", "b0"])
+      assert.deepStrictEqual(payload.cursors, { standalone: "0" })
+      assert.strictEqual(payload.append, true)
+      assert.deepStrictEqual(scannedCursors(client), ["9"])
+    })
+
+    it("should not scan again once the cursor is back at 0", async () => {
+      const client = createScanClient()
+
+      await import("../keys-browser").then((m) =>
+        m.getKeys(client as any, mockWs, { connectionId: "conn-123", cursors: { standalone: "0" } }))
+
+      const { payload } = JSON.parse(messages[0])
+      assert.deepStrictEqual(payload.keys, [])
+      assert.deepStrictEqual(scannedCursors(client), [])
     })
   })
 

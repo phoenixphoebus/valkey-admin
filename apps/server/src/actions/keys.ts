@@ -6,6 +6,8 @@ type GetKeysPayload = {
   connectionId: string;
   pattern?: string | undefined;
   count?: number | undefined;
+  cursors?: Record<string, string> | undefined;
+  scanId?: string | undefined;
 }
 
 export const getKeysRequested = withDeps<Deps, void>(

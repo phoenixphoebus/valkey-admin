@@ -9,7 +9,8 @@ import {
   KeyRound,
   RefreshCw,
   ListFilter,
-  ChartPie
+  ChartPie,
+  Square
 } from "lucide-react"
 import { truncateText } from "@common/src/truncate-text"
 import { toScanPattern } from "@common/src/scan-pattern"
@@ -19,6 +20,7 @@ import DonutChart from "../ui/donut-chart"
 import AddNewKey from "./add-key"
 import KeyDetails from "./key-details/key-details"
 import { KeyTree } from "./key-tree"
+import { ScanAllModal, type ScanAllParams } from "./scan-all-modal"
 import { Button } from "../ui/button"
 import { Select } from "../ui/select"
 import { StatCard } from "../ui/stat-card"
@@ -33,11 +35,19 @@ import {
   selectKeys,
   selectLoading,
   selectError,
-  selectTotalKeys
+  selectTotalKeys,
+  selectCursors,
+  selectHasMoreKeys,
+  selectPattern,
+  selectLoadingMore,
+  selectScanId,
+  selectScanAllRunning
 } from "@/state/valkey-features/keys/keyBrowserSelectors"
 import {
   getKeysRequested,
-  getKeyTypeRequested
+  getKeyTypeRequested,
+  scanAllRequested,
+  scanAllStopped
 } from "@/state/valkey-features/keys/keyBrowserSlice"
 import { selectClusterAlias } from "@/state/valkey-features/connection/connectionSelectors"
 
@@ -59,6 +69,8 @@ export function KeyBrowser() {
   const [isDistributionOpen, setIsDistributionOpen] = useState(false)
   const [searchPattern, setSearchPattern] = useState("")
   const [selectedType, setSelectedType] = useState<string>("all")
+  const [isScanAllOpen, setIsScanAllOpen] = useState(false)
+  const [scanAllParams, setScanAllParams] = useState<ScanAllParams>({ maxKeys: 50000, delayMs: 100 })
   const clusterAlias = useSelector(selectClusterAlias(id!))
   const keyTypes = [
     { value: "all", label: "All Key Types" },
@@ -99,15 +111,42 @@ export function KeyBrowser() {
   const loading = useSelector(selectLoading(id!))
   const error = useSelector(selectError(id!))
   const totalKeys = useSelector(selectTotalKeys(id!))
+  const cursors = useSelector(selectCursors(id!))
+  const hasMoreKeys = useSelector(selectHasMoreKeys(id!))
+  const activePattern = useSelector(selectPattern(id!))
+  const loadingMore = useSelector(selectLoadingMore(id!))
+  const scanId = useSelector(selectScanId(id!))
+  const scanAllRunning = useSelector(selectScanAllRunning(id!))
+  const busy = loading
+  const nodeCursors = Object.values(cursors)
+  const nodesDone = nodeCursors.filter((cursor) => cursor === "0").length
 
   useEffect(() => {
     if (id) {
       dispatch(getKeysRequested({ connectionId: id! }))
     }
+    // Leaving the page or switching connection cancels a running Scan all.
+    return () => {
+      if (id) dispatch(scanAllStopped({ connectionId: id, reason: "stopped" }))
+    }
   }, [id, dispatch])
 
   const handleRefresh = () => {
     dispatch(getKeysRequested({ connectionId: id! }))
+  }
+
+  // Resumes the current scan (same pattern) from where the last batch stopped.
+  const handleLoadMore = () => {
+    dispatch(getKeysRequested({ connectionId: id!, pattern: activePattern, cursors, scanId }))
+  }
+
+  const handleScanAll = (params: ScanAllParams) => {
+    setScanAllParams(params)
+    dispatch(scanAllRequested({ connectionId: id!, ...params }))
+  }
+
+  const handleStopScanAll = () => {
+    dispatch(scanAllStopped({ connectionId: id!, reason: "stopped" }))
   }
 
   const handleKeyClick = (keyName: string) => {
@@ -182,7 +221,7 @@ export function KeyBrowser() {
       <div className="flex items-center w-full gap-2">
         <Select
           className="w-48"
-          disabled={loading}
+          disabled={busy}
           icon={<ListFilter size={16} />}
           onChange={(e) => setSelectedType(e.target.value)}
           value={selectedType}
@@ -196,7 +235,7 @@ export function KeyBrowser() {
 
         <Button
           className="font-normal"
-          disabled={loading}
+          disabled={busy}
           onClick={() => setIsDistributionOpen(true)}
           type="button"
           variant={"outline"}
@@ -206,7 +245,7 @@ export function KeyBrowser() {
 
         <form className="flex-1" onSubmit={handleSearch}>
           <SearchInput
-            disabled={loading}
+            disabled={busy}
             onChange={(e) => setSearchPattern(e.target.value)}
             onClear={handleClearSearch}
             placeholder="Search keys (supports glob: * ? [ ])"
@@ -224,7 +263,7 @@ export function KeyBrowser() {
 
         <Button
           aria-label="Edit connection settings"
-          disabled={loading}
+          disabled={busy}
           onClick={handleRefresh}
           size="icon"
           type="button"
@@ -235,6 +274,29 @@ export function KeyBrowser() {
 
       {/* Add Key Modal */}
       {isAddKeyOpen && <AddNewKey onClose={handleAddKeyModal} />}
+
+      <ScanAllModal
+        onClose={() => setIsScanAllOpen(false)}
+        onScan={handleScanAll}
+        open={isScanAllOpen}
+        params={scanAllParams}
+        pattern={activePattern}
+      />
+
+      {/* Scan all progress */}
+      {scanAllRunning && (
+        <div className="flex items-center justify-between gap-2 px-3 py-2 border border-input rounded-md" role="status">
+          <Typography variant="bodySm">
+            Scanning all keys{activePattern && activePattern !== "*" ? ` matching "${activePattern}"` : ""}:{" "}
+            {keys.length.toLocaleString()} loaded of {totalKeys.toLocaleString()} in database
+            {nodeCursors.length > 1 && ` · ${nodesDone} of ${nodeCursors.length} nodes done`}
+            {` · stops at ${scanAllParams.maxKeys.toLocaleString()}`}
+          </Typography>
+          <Button onClick={handleStopScanAll} size="sm" type="button" variant="outline">
+            <Square size={14} /> Stop
+          </Button>
+        </div>
+      )}
 
       {/* Key Type Distribution Modal */}
       <ChartModal
@@ -252,10 +314,33 @@ export function KeyBrowser() {
           left={
             <Panel
               emptyState={selectedType === "all" ? "No keys found" : `No ${selectedType} keys found`}
-              isEmpty={filteredKeys.length === 0 && !loading}
+              isEmpty={filteredKeys.length === 0 && !loading && !hasMoreKeys}
               loading={loading}
             >
               <KeyTree
+                footer={hasMoreKeys && !loading && (
+                  <div className="flex flex-col items-center gap-1 py-2">
+                    <div className="flex gap-2">
+                      <Button
+                        disabled={loadingMore || scanAllRunning}
+                        onClick={handleLoadMore}
+                        type="button"
+                        variant="outline"
+                      >
+                        {loadingMore ? "Loading..." : "Load more"}
+                      </Button>
+                      <Button
+                        disabled={loadingMore || scanAllRunning}
+                        onClick={() => setIsScanAllOpen(true)}
+                        type="button"
+                        variant="outline"
+                      >
+                        Scan all...
+                      </Button>
+                    </div>
+                    <Typography variant="bodyXs">{keys.length.toLocaleString()} keys loaded</Typography>
+                  </div>
+                )}
                 keys={filteredKeys}
                 loading={loading}
                 onKeyClick={handleKeyClick}

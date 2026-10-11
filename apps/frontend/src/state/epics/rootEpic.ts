@@ -39,7 +39,7 @@ export const registerEpics = (store: Store) => {
     getBigKeysEpic(),
     getCommandLogsEpic(),
     updateConfigEpic(),
-    keyBrowserEpic(),
+    keyBrowserEpic(store),
     getCpuUsageEpic(),
     getMemoryUsageEpic(),
     monitorEpic(),

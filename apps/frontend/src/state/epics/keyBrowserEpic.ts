@@ -1,19 +1,96 @@
-import { tap, ignoreElements } from "rxjs/operators"
-import { merge } from "rxjs"
+import { tap, ignoreElements, filter, exhaustMap, concatMap, takeUntil, groupBy, mergeMap } from "rxjs/operators"
+import { merge, of, concat, timer } from "rxjs"
 import { toast } from "sonner"
 import { getSocket } from "./wsEpics"
 import {
   getKeysRequested,
+  getKeysFulfilled,
+  getKeysFailed,
+  scanAllRequested,
+  scanAllStopped,
   getKeyTypeRequested,
   deleteKeyRequested,
   addKeyRequested,
   addKeyFailed,
   updateKeyRequested
 } from "../valkey-features/keys/keyBrowserSlice"
-import { action$, select } from "../middleware/rxjsMiddleware/rxjsMiddleware"
+import {
+  selectKeys,
+  selectCursors,
+  selectHasMoreKeys,
+  selectPattern,
+  selectScanId
+} from "../valkey-features/keys/keyBrowserSelectors"
+import { closeConnection, connectionBroken, deleteConnection } from "../valkey-features/connection/connectionSlice"
+import { action$, select, selectMany } from "../middleware/rxjsMiddleware/rxjsMiddleware"
+import type { Store } from "@reduxjs/toolkit"
 
-export const keyBrowserEpic = () =>
+const forConnection = (connectionId: string) =>
+  filter((action: { payload: { connectionId: string } }) => action.payload.connectionId === connectionId)
+
+// Scan all: request the next batch each time the previous one lands, pausing `delayMs` in between,
+// until every node is scanned, `maxKeys` are loaded, or something cancels it.
+const scanAllEpic = (store: Store) =>
+  action$.pipe(
+    select(scanAllRequested),
+    groupBy((action) => action.payload.connectionId),
+    // One Scan all per connection; repeat requests while one is running are ignored.
+    mergeMap((group$) => group$.pipe(
+      exhaustMap(({ payload: { connectionId, maxKeys, delayMs } }) => {
+        const nextBatch = () => {
+          const state = store.getState()
+          if (!selectHasMoreKeys(connectionId)(state)) {
+            store.dispatch(scanAllStopped({ connectionId, reason: "complete" }))
+          } else if (selectKeys(connectionId)(state).length >= maxKeys) {
+            store.dispatch(scanAllStopped({ connectionId, reason: "limit" }))
+          } else {
+            store.dispatch(getKeysRequested({
+              connectionId,
+              pattern: selectPattern(connectionId)(state),
+              cursors: selectCursors(connectionId)(state),
+              scanId: selectScanId(connectionId)(state),
+            }))
+          }
+        }
+
+        // Stop, a fresh scan (Refresh/search), a failed batch, or losing the connection ends the loop.
+        const cancel$ = merge(
+          action$.pipe(select(scanAllStopped), forConnection(connectionId)),
+          action$.pipe(select(getKeysRequested), filter((a) => a.payload.connectionId === connectionId && !a.payload.cursors)),
+          action$.pipe(selectMany(getKeysFailed, closeConnection, connectionBroken, deleteConnection), forConnection(connectionId)),
+        )
+
+        return concat(
+          of(null),
+          action$.pipe(
+            select(getKeysFulfilled),
+            filter((a) => a.payload.connectionId === connectionId
+              && a.payload.scanId === selectScanId(connectionId)(store.getState())),
+            concatMap(() => timer(delayMs)),
+          ),
+        ).pipe(
+          tap(nextBatch),
+          takeUntil(cancel$),
+        )
+      }),
+    )),
+    ignoreElements(),
+  )
+
+export const keyBrowserEpic = (store: Store) =>
   merge(
+    scanAllEpic(store),
+
+    action$.pipe(
+      select(scanAllStopped),
+      tap(({ payload: { reason, connectionId } }) => {
+        const loaded = selectKeys(connectionId)(store.getState()).length.toLocaleString()
+        if (reason === "complete") toast.success(`Scan complete: ${loaded} keys loaded`)
+        if (reason === "limit") toast.info(`Scan stopped at the key limit: ${loaded} keys loaded`)
+      }),
+      ignoreElements(),
+    ),
+
     // for getting all keys (getKeys)
     action$.pipe(
       select(getKeysRequested),

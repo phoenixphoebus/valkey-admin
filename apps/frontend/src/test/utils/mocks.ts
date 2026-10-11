@@ -39,8 +39,10 @@ export const mockWebSocketState = (overrides?: object) => ({
 
 export const mockKeyBrowserState = (overrides?: object) => ({
   keys: [],
-  cursor: "0",
+  cursors: {},
   loading: false,
+  loadingMore: false,
+  scanAllRunning: false,
   error: null,
   keyTypeLoading: {},
   totalKeys: 0,
