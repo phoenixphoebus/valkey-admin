@@ -1187,7 +1187,7 @@ async function updateHashKey(
 }
 
 /**
- * Removes, sets and appends list elements in one batch, then applies a new TTL if given.
+ * Sets, removes and appends list elements in one batch, then applies a new TTL if given.
  * Refuses updates to elements that currently hold binary data, since saving the escaped text would corrupt them.
  */
 async function updateListKey(
@@ -1211,19 +1211,19 @@ async function updateListKey(
   if (client instanceof GlideClient) {
     const batch = new Batch(true)
 
-    // first delete items (sorted by index descending to avoid index shifting issues)
+    // first update items, while indexes still match the ones checked by LINDEX above
+    if (updates && updates.length > 0) {
+      updates.forEach(({ index, value }) =>
+        batch.customCommand(["LSET", key, index.toString(), value]),
+      )
+    }
+
+    // then delete items (sorted by index descending to avoid index shifting issues)
     if (deletedListItems && deletedListItems.length > 0) {
       const sortedDeletes = [...deletedListItems].sort((a, b) => b.index - a.index)
       sortedDeletes.forEach(({ value }) => {
         batch.customCommand(["LREM", key, "1", value])
       })
-    }
-
-    // then update items
-    if (updates && updates.length > 0) {
-      updates.forEach(({ index, value }) =>
-        batch.customCommand(["LSET", key, index.toString(), value]),
-      )
     }
 
     // then add new items to the end of the list
@@ -1239,17 +1239,17 @@ async function updateListKey(
   } else if (client instanceof GlideClusterClient) {
     const batch = new ClusterBatch(true)
 
+    if (updates && updates.length > 0) {
+      updates.forEach(({ index, value }) =>
+        batch.customCommand(["LSET", key, index.toString(), value]),
+      )
+    }
+
     if (deletedListItems && deletedListItems.length > 0) {
       const sortedDeletes = [...deletedListItems].sort((a, b) => b.index - a.index)
       sortedDeletes.forEach(({ value }) => {
         batch.customCommand(["LREM", key, "1", value])
       })
-    }
-
-    if (updates && updates.length > 0) {
-      updates.forEach(({ index, value }) =>
-        batch.customCommand(["LSET", key, index.toString(), value]),
-      )
     }
 
     // then add new items to the end of the list
