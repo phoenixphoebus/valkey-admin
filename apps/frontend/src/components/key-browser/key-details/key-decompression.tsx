@@ -54,7 +54,10 @@ function DecompressedValue({ result, onContinue }: { result: DecompressionResult
 
       {result.previewTruncated && (
         <Typography className="text-muted-foreground" variant="bodyXs">
-          Showing the first {formatBytes(result.previewBytes)} of {formatBytes(result.outputBytes)}.
+          {result.previewStart === 0
+            ? `Showing the first ${formatBytes(result.previewBytes)} of ${formatBytes(result.outputBytes)}.`
+            : `Showing bytes ${result.previewStart.toLocaleString()}–${(result.previewStart + result.previewBytes).toLocaleString()}`
+              + ` of ${result.outputBytes.toLocaleString()}, the newly decoded part.`}
         </Typography>
       )}
 
@@ -127,7 +130,10 @@ export default function KeyDecompression({ connectionId, keyName, actionLabel = 
         <DecompressedValue
           onContinue={() => {
             const { codec, outputLimit, maxOutputBytes } = entry.result!
-            dispatch(rawValueRequested({ ...target, codecChoice: codec, outputLimit: outputLimit + maxOutputBytes }))
+            // Preview from the previous limit, so the newly decoded output is what's shown.
+            dispatch(rawValueRequested({
+              ...target, codecChoice: codec, outputLimit: outputLimit + maxOutputBytes, previewStart: outputLimit,
+            }))
           }}
           result={entry.result}
         />

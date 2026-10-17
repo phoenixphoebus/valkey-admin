@@ -1,12 +1,14 @@
 import { describe, it } from "node:test"
 import assert from "node:assert"
-import { deflateSync, gzipSync, zstdCompressSync, constants } from "node:zlib"
+import { deflateSync, gzipSync, constants } from "node:zlib"
 import { randomBytes } from "node:crypto"
 import { detectCompressionCodec, parseGlideHeader } from "../compression"
 
 const text = (s: string) => new TextEncoder().encode(s)
 const bytes = (...values: number[]) => Uint8Array.from(values)
 const payload = text("hello hello hello hello hello")
+// `zstd -c` of the payload above; node:zlib's zstd support needs Node 22.15+, so the bytes are inlined.
+const zstdPayload = Uint8Array.from(Buffer.from("28b52ffd04586500003068656c6c6f200100a94b11874e200a", "hex"))
 
 describe("detectCompressionCodec", () => {
   it("detects gzip", () => {
@@ -20,7 +22,7 @@ describe("detectCompressionCodec", () => {
   })
 
   it("detects zstd", () => {
-    assert.strictEqual(detectCompressionCodec(zstdCompressSync(payload)), "zstd")
+    assert.strictEqual(detectCompressionCodec(zstdPayload), "zstd")
   })
 
   it("detects an LZ4 frame", () => {
@@ -33,8 +35,7 @@ describe("detectCompressionCodec", () => {
   })
 
   it("detects GLIDE headers ahead of the inner format", () => {
-    const zstd = zstdCompressSync(payload)
-    assert.strictEqual(detectCompressionCodec(Uint8Array.from([0, 1, 2, 0, 1, ...zstd])), "glide-zstd")
+    assert.strictEqual(detectCompressionCodec(Uint8Array.from([0, 1, 2, 0, 1, ...zstdPayload])), "glide-zstd")
     assert.strictEqual(detectCompressionCodec(bytes(0, 1, 2, 0, 2, 5, 0, 0, 0, 0x50)), "glide-lz4")
   })
 

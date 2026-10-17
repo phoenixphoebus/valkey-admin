@@ -36,7 +36,9 @@ async function decodeRawValue(
   if (outcome.kind === "cancelled") return undefined
   if (outcome.kind === "failed") return decompressFailed({ ...target, error: outcome.error })
 
-  const preview = renderDecompressed(outcome.output, { truncated: outcome.truncated, previewMaxBytes: raw.previewMaxBytes })
+  const preview = renderDecompressed(outcome.output, {
+    truncated: outcome.truncated, previewMaxBytes: raw.previewMaxBytes, previewStart: entry.previewStart,
+  })
   return decompressFulfilled({
     ...target,
     result: {

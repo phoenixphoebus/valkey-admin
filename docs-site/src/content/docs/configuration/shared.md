@@ -29,7 +29,9 @@ This is the variable to set when you want to prevent users from accidentally fan
 
 ## Code-Level Tunables
 
-Everything below is a plain code constant. There is no environment variable for any of them — to change them, edit `common/src/constants.ts` and rebuild. They are documented here because this is the canonical place to tune these behaviors, and because their defaults are easy to forget.
+Everything below is a code constant in `common/src/constants.ts`; to change one, edit it there and rebuild. They are documented here because this is the canonical place to tune these behaviors, and because their defaults are easy to forget.
+
+The exceptions are the Key Browser limits `KEY_VALUE_SIZE_LIMIT_BYTES`, `KEY_RAW_VALUE_MAX_BYTES`, `DECOMPRESS_MAX_OUTPUT_BYTES` and `DECOMPRESS_PREVIEW_MAX_BYTES`: the server also reads an environment variable of the same name, which overrides the constant without a rebuild (see [Server Configuration](/configuration/server/)).
 
 ### `FETCH_TIMEOUT_MS`
 

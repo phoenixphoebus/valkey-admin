@@ -243,13 +243,38 @@ describe("renderDecompressed", () => {
 
   it("pretty-prints complete JSON", () => {
     expect(renderDecompressed(encode("{\"a\":[1]}"), { truncated: false, previewMaxBytes: MiB }))
-      .toEqual({ view: "json", preview: "{\n  \"a\": [\n    1\n  ]\n}", previewTruncated: false, previewBytes: 9 })
+      .toEqual({ view: "json", preview: "{\n  \"a\": [\n    1\n  ]\n}", previewStart: 0, previewBytes: 9, previewTruncated: false })
   })
 
   it("shows truncated JSON as text, accepting a character cut in half", () => {
     const cut = encode("[\"café\"]").subarray(0, 6)
     expect(renderDecompressed(cut, { truncated: true, previewMaxBytes: MiB }))
-      .toEqual({ view: "text", preview: "[\"caf", previewTruncated: false, previewBytes: 6 })
+      .toEqual({ view: "text", preview: "[\"caf", previewStart: 0, previewBytes: 5, previewTruncated: true })
+  })
+
+  it("falls back to text when pretty-printed JSON exceeds the preview limit", () => {
+    // 21 bytes compact, 41 bytes pretty-printed.
+    const compact = encode(JSON.stringify({ a: [1, 2, 3], b: 4 }))
+    expect(renderDecompressed(compact, { truncated: false, previewMaxBytes: 30 }))
+      .toMatchObject({ view: "text", preview: "{\"a\":[1,2,3],\"b\":4}", previewTruncated: false })
+  })
+
+  it("limits text by UTF-8 bytes and cuts on a character boundary", () => {
+    // Each "é" is 2 bytes, so 7 bytes hold 3 whole characters.
+    const result = renderDecompressed(encode("éééééé"), { truncated: false, previewMaxBytes: 7 })
+    expect(result).toEqual({ view: "text", preview: "ééé", previewStart: 0, previewBytes: 6, previewTruncated: true })
+  })
+
+  it("starts the preview at previewStart, on the next character boundary", () => {
+    // Byte 1 is the second byte of the first "é".
+    const result = renderDecompressed(encode("ééab"), { truncated: false, previewMaxBytes: 100, previewStart: 1 })
+    expect(result).toEqual({ view: "text", preview: "éab", previewStart: 2, previewBytes: 4, previewTruncated: true })
+  })
+
+  it("starts a hex preview at previewStart with absolute offsets", () => {
+    const result = renderDecompressed(new Uint8Array(100), { truncated: true, previewMaxBytes: 80, previewStart: 32 })
+    expect(result).toMatchObject({ view: "hex", previewStart: 32, previewBytes: 16, previewTruncated: true })
+    expect(result.preview).toBe("00000020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|")
   })
 
   it("shows plain text and JSON-looking scalars as text", () => {

@@ -11,6 +11,7 @@ export interface DecompressionResult {
   view: DecompressedView;
   preview: string;
   previewTruncated: boolean;
+  previewStart: number;
   previewBytes: number;
   outputBytes: number;
   inputBytes: number;
@@ -28,6 +29,8 @@ export interface DecompressionEntry {
   codecChoice: CodecChoice;
   // Requested output limit; undefined uses the server's default.
   outputLimit?: number;
+  // Output offset the preview starts at; Continue sets it to the previous limit to show the newly decoded part.
+  previewStart?: number;
   result?: DecompressionResult;
   error?: string;
 }
@@ -38,6 +41,7 @@ interface KeyDecompressionState {
 
 type KeyTarget = { connectionId: string; key: string }
 type RequestTarget = KeyTarget & { requestId: string }
+type DecodeOptions = { codecChoice: CodecChoice; outputLimit?: number; previewStart?: number }
 
 const initialState: KeyDecompressionState = {}
 
@@ -56,12 +60,12 @@ const keyDecompressionSlice = createSlice({
   reducers: {
     // Also the websocket request: the server replies with the value's bytes.
     rawValueRequested: {
-      reducer: (state, action: PayloadAction<RequestTarget & { codecChoice: CodecChoice; outputLimit?: number }>) => {
-        const { connectionId, key, requestId, codecChoice, outputLimit } = action.payload
+      reducer: (state, action: PayloadAction<RequestTarget & DecodeOptions>) => {
+        const { connectionId, key, requestId, codecChoice, outputLimit, previewStart } = action.payload
         state[connectionId] ??= {}
-        state[connectionId][key] = { status: "loading", requestId, codecChoice, outputLimit }
+        state[connectionId][key] = { status: "loading", requestId, codecChoice, outputLimit, previewStart }
       },
-      prepare: (payload: KeyTarget & { codecChoice: CodecChoice; outputLimit?: number }) => ({
+      prepare: (payload: KeyTarget & DecodeOptions) => ({
         payload: { ...payload, requestId: nanoid() },
       }),
     },

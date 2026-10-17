@@ -154,6 +154,10 @@ describe("KeyDecompression", () => {
     expect(screen.getByTestId("decompressed-value").textContent).toBe("{\"user\":\"a")
 
     await user.click(within(alert).getByRole("button", { name: "Continue to 20 B" }))
-    expect(sent[1].payload).toMatchObject({ codecChoice: "gzip", outputLimit: 20 })
+    expect(sent[1].payload).toMatchObject({ codecChoice: "gzip", outputLimit: 20, previewStart: 10 })
+
+    replyWithStoredValue({ maxOutputBytes: 10 })
+    expect(await screen.findByText("Showing bytes 10–20 of 20, the newly decoded part.")).toBeInTheDocument()
+    expect(screen.getByTestId("decompressed-value").textContent).toBe("da\",\"roles")
   })
 })
