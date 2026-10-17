@@ -9,7 +9,7 @@ import {
   ClosingError, 
   Decoder,
   GlideReturnType,
-  GlideString,
+  GlideString
 } from "@valkey/valkey-glide"
 import pLimit from "p-limit"
 import { VALKEY, VALKEY_CLIENT } from "valkey-common"
@@ -30,8 +30,16 @@ interface EnrichedKeyInfo {
   elements?: any; // this can be array, object, or string depending on the key type.
   elementsWarning?: string; // alternative for elements when they cannot be displayed.
   isBinary?: boolean;
-  binaryIndexes?: number[]; // indexes into collection `elements` that hold binary data, shown escaped.
+  binaryIndexes?: number[]; // indexes into list, set or sorted set `elements` that hold binary data, shown escaped.
+  binaryKeyIndexes?: number[]; // indexes of hash elements whose field name is binary.
+  binaryValueIndexes?: number[]; // indexes of hash elements whose value is binary.
+  binaryStreamParts?: BinaryStreamPart[]; // stream fields or values that are binary.
 }
+
+/**
+ * Locates one binary field name or value inside a stream entry: `elements[entry].value[field]`.
+ */
+type BinaryStreamPart = { entry: number; field: number; part: "field" | "value" }
 
 /**
  * Valkey strings are binary-safe, so a value may not be valid UTF-8. Strict decoding tells
@@ -77,19 +85,46 @@ function rawIdentity(raw: GlideReturnType): string {
 }
 
 /**
+ * Indexes of the items that pass `test`, or undefined when none do so the payload stays unchanged for text-only keys.
+ */
+function indexesWhere<T>(items: T[], test: (item: T) => boolean): number[] | undefined {
+  const indexes = items.flatMap((item, i) => (test(item) ? [i] : []))
+  return indexes.length > 0 ? indexes : undefined
+}
+
+/**
  * Splits decoded elements into the `elements` payload plus the indexes of the binary ones.
  */
 function withBinaryIndexes<T>(decoded: { value: T; isBinary: boolean }[]): { elements: T[]; binaryIndexes?: number[] } {
-  const binaryIndexes = decoded.flatMap(({ isBinary }, i) => (isBinary ? [i] : []))
+  const binaryIndexes = indexesWhere(decoded, ({ isBinary }) => isBinary)
   return {
     elements: decoded.map(({ value }) => value),
-    ...(binaryIndexes.length > 0 ? { binaryIndexes } : {}),
+    ...(binaryIndexes ? { binaryIndexes } : {}),
+  }
+}
+
+type DecodedHashField = { value: { key: string; value: string }; isKeyBinary: boolean; isValueBinary: boolean }
+
+/**
+ * Splits decoded hash fields into the `elements` payload plus the indexes of binary field names and binary values,
+ * so a text field holding a binary value can still be deleted by name.
+ */
+function withHashBinaryIndexes(decoded: DecodedHashField[]): {
+  elements: { key: string; value: string }[]; binaryKeyIndexes?: number[]; binaryValueIndexes?: number[]
+} {
+  const binaryKeyIndexes = indexesWhere(decoded, ({ isKeyBinary }) => isKeyBinary)
+  const binaryValueIndexes = indexesWhere(decoded, ({ isValueBinary }) => isValueBinary)
+  return {
+    elements: decoded.map(({ value }) => value),
+    ...(binaryKeyIndexes ? { binaryKeyIndexes } : {}),
+    ...(binaryValueIndexes ? { binaryValueIndexes } : {}),
   }
 }
 
 /**
  * Loads every element of a set or hash with SSCAN/HSCAN, deduping by raw bytes.
- * Hash fields become `{ key, value }` pairs; binary elements are escaped and listed in `binaryIndexes`.
+ * Hash fields become `{ key, value }` pairs. Binary data is escaped; binary set members are listed in
+ * `binaryIndexes`, binary hash field names in `binaryKeyIndexes` and binary hash values in `binaryValueIndexes`.
  */
 async function getScanKeyInfo(
   client: GlideClient | GlideClusterClient,
@@ -98,7 +133,8 @@ async function getScanKeyInfo(
 ): Promise<EnrichedKeyInfo> {
   try {
     // Keyed by raw bytes so elements SCAN returns more than once are only kept once.
-    const results = new Map<string, { value: string | { key: string; value: string }; isBinary: boolean }>()
+    const members = new Map<string, { value: string; isBinary: boolean }>()
+    const hashFields = new Map<string, DecodedHashField>()
     const isHash = keyInfo.type.toLowerCase() === "hash"
     let cursor = "0"
     
@@ -118,13 +154,14 @@ async function getScanKeyInfo(
             for (let i = 0; i < elements.length; i += 2){
               const field = decodeToStringValue(elements[i])
               const value = decodeToStringValue(elements[i + 1])
-              results.set(rawIdentity(elements[i]), {
+              hashFields.set(rawIdentity(elements[i]), {
                 value: { key: field.value, value: value.value },
-                isBinary: field.isBinary || value.isBinary,
+                isKeyBinary: field.isBinary,
+                isValueBinary: value.isBinary,
               })
             }
           } else {
-            elements.forEach((element) => results.set(rawIdentity(element), decodeToStringValue(element)))
+            elements.forEach((element) => members.set(rawIdentity(element), decodeToStringValue(element)))
           }
           cursor = toText(newCursor)
         } while (cursor !== "0")
@@ -134,7 +171,9 @@ async function getScanKeyInfo(
     return {
       ...keyInfo,
       collectionSize: collectionSize as number,
-      ...withBinaryIndexes(Array.from(results.values())),
+      ...(isHash
+        ? withHashBinaryIndexes(Array.from(hashFields.values()))
+        : withBinaryIndexes(Array.from(members.values()))),
     }
   } catch (err) {
     console.log(`Could not get elements for key ${keyInfo.name}:`, err)
@@ -182,16 +221,20 @@ async function getPaginatedListInfo(
 
 type StreamEntry = { key: string; value: [string, string][] }
 
+type DecodedStreamEntry = { value: StreamEntry; id: string; binaryParts: Omit<BinaryStreamPart, "entry">[] }
+
 /**
  * GLIDE returns entries as { key: id, value: [[field, value], ...] }; plain RESP arrays are [id, [field, value, ...]].
- * Both are normalized to the GLIDE shape. An entry is flagged binary if any field or value is.
+ * Both are normalized to the GLIDE shape. Each binary field name or value is recorded in `binaryParts`.
  */
-function decodeStreamEntry(raw: GlideReturnType): { value: StreamEntry; id: string; isBinary: boolean } {
-  let isBinary = false
-  const decode = (part: GlideReturnType): string => {
-    const decoded = decodeToStringValue(part)
-    isBinary ||= decoded.isBinary
-    return decoded.value
+function decodeStreamEntry(raw: GlideReturnType): DecodedStreamEntry {
+  const binaryParts: Omit<BinaryStreamPart, "entry">[] = []
+  const decodePair = (rawField: GlideReturnType, rawValue: GlideReturnType, field: number): [string, string] => {
+    const decodedField = decodeToStringValue(rawField)
+    const decodedValue = decodeToStringValue(rawValue)
+    if (decodedField.isBinary) binaryParts.push({ field, part: "field" })
+    if (decodedValue.isBinary) binaryParts.push({ field, part: "value" })
+    return [decodedField.value, decodedValue.value]
   }
 
   if (Array.isArray(raw)) {
@@ -199,20 +242,31 @@ function decodeStreamEntry(raw: GlideReturnType): { value: StreamEntry; id: stri
     const id = toText(rawId)
     const fields: [string, string][] = []
     for (let i = 0; i < rawFields.length; i += 2) {
-      fields.push([decode(rawFields[i]), decode(rawFields[i + 1])])
+      fields.push(decodePair(rawFields[i], rawFields[i + 1], i / 2))
     }
-    return { value: { key: id, value: fields }, id, isBinary }
+    return { value: { key: id, value: fields }, id, binaryParts }
   }
 
   const { key, value } = raw as { key: GlideReturnType; value: GlideReturnType[][] }
   const id = toText(key)
-  const fields = value.map(([field, fieldValue]): [string, string] => [decode(field), decode(fieldValue)])
-  return { value: { key: id, value: fields }, id, isBinary }
+  const fields = value.map(([field, fieldValue], i) => decodePair(field, fieldValue, i))
+  return { value: { key: id, value: fields }, id, binaryParts }
+}
+
+/**
+ * Splits decoded stream entries into the `elements` payload plus the location of every binary field name or value.
+ */
+function withStreamBinaryParts(decoded: DecodedStreamEntry[]): { elements: StreamEntry[]; binaryStreamParts?: BinaryStreamPart[] } {
+  const binaryStreamParts = decoded.flatMap(({ binaryParts }, entry) => binaryParts.map((part) => ({ entry, ...part })))
+  return {
+    elements: decoded.map(({ value }) => value),
+    ...(binaryStreamParts.length > 0 ? { binaryStreamParts } : {}),
+  }
 }
 
 /**
  * Loads a stream with XRANGE one page at a time, resuming after the last entry ID.
- * Entries holding binary fields or values are escaped and listed in `binaryIndexes`.
+ * Binary field names and values are escaped and located in `binaryStreamParts`.
  */
 async function getPaginatedStreamInfo(
   client: GlideClient | GlideClusterClient,
@@ -245,7 +299,7 @@ async function getPaginatedStreamInfo(
       }
     }
 
-    return { ...keyInfo, collectionSize, ...withBinaryIndexes(results) }
+    return { ...keyInfo, collectionSize, ...withStreamBinaryParts(results) }
   } catch (err) {
     console.log(`Could not get elements for key ${keyInfo.name}:`, err)
     return { ...keyInfo, elementsWarning: VALKEY_CLIENT.MESSAGES.NOT_READABLE }
@@ -1092,6 +1146,10 @@ async function updateJsonKey(
   }
 }
 
+/**
+ * Deletes and sets hash fields, then applies a new TTL if given.
+ * Refuses fields that currently hold binary data, since saving the escaped text would corrupt them.
+ */
 async function updateHashKey(
   client: GlideClient | GlideClusterClient,
   key: string,
@@ -1101,6 +1159,13 @@ async function updateHashKey(
 ) {
   console.debug("delete hash fields:::", deletedHashFields)
   console.debug("update hash fields:::", fields)
+  const names = (fields ?? []).map(({ field }) => field)
+  if (names.length > 0) {
+    const current = await client.customCommand(["HMGET", key, ...names], { decoder: Decoder.Bytes }) as GlideReturnType[]
+    const binary = names.filter((_, i) => current?.[i] != null && decodeToStringValue(current[i]).isBinary)
+    if (binary.length > 0) throw new Error(`Fields ${binary.join(", ")} hold binary data and cannot be edited as text.`)
+  }
+
   // first delete fields if any
   if (deletedHashFields && deletedHashFields.length > 0) {
     const hdelCommand = ["HDEL", key, ...deletedHashFields]
@@ -1121,6 +1186,10 @@ async function updateHashKey(
   }
 }
 
+/**
+ * Removes, sets and appends list elements in one batch, then applies a new TTL if given.
+ * Refuses updates to elements that currently hold binary data, since saving the escaped text would corrupt them.
+ */
 async function updateListKey(
   client: GlideClient | GlideClusterClient,
   key: string,
@@ -1129,6 +1198,15 @@ async function updateListKey(
   deletedListItems?: { index: number; value: string }[],
   newListItems?: string[],
 ) {
+  if (updates && updates.length > 0) {
+    const current = await Promise.all(updates.map(({ index }) =>
+      client.customCommand(["LINDEX", key, index.toString()], { decoder: Decoder.Bytes }),
+    ))
+    const binary = updates.filter((_, i) => current[i] != null && decodeToStringValue(current[i]).isBinary)
+    if (binary.length > 0) {
+      throw new Error(`Elements at index ${binary.map(({ index }) => index).join(", ")} hold binary data and cannot be edited as text.`)
+    }
+  }
 
   if (client instanceof GlideClient) {
     const batch = new Batch(true)

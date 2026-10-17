@@ -1,6 +1,7 @@
 import { Typography } from "../../ui/typography"
+import { BinaryNotice, BinaryValue } from "./binary-value"
+import { binaryStreamPartLookup, type BinaryStreamPart } from "./binary-indexes"
 import { cn } from "@/lib/utils"
-import { BinaryBadge } from "./binary-badge"
 
 interface KeyDetailsStreamProps {
   selectedKey: string;
@@ -14,26 +15,28 @@ interface KeyDetailsStreamProps {
       key: string;
       value: [string, string][];
     }>;
-    binaryIndexes?: number[];
+    binaryStreamParts?: BinaryStreamPart[];
   };
   connectionId: string;
   readOnly: boolean;
 }
 
 /**
- * Shows a stream's entries and their fields; entries with binary data are badged.
+ * Shows a stream's entries and their fields; binary field names and values are badged where they occur.
  */
 export default function KeyDetailsStream(
   { selectedKeyInfo }: KeyDetailsStreamProps,
 ) {
+  const binaryParts = binaryStreamPartLookup(selectedKeyInfo.binaryStreamParts)
+
   return (
     <div className="flex flex-col w-full p-4 space-y-4">
+      <BinaryNotice count={binaryParts.entryCount} noun="entries" total={selectedKeyInfo.elements.length} />
       {selectedKeyInfo?.elements.map((entry, index: number) => (
         <div className="overflow-hidden" key={index}>
           <div className={cn("bg-muted/60 text-foreground py-2 px-4")}>
             <Typography variant="label">Entry ID: {entry.key}</Typography> 
             <Typography variant="bodySm">({new Date(Number(entry.key.split("-")[0])).toLocaleString()})</Typography>
-            {selectedKeyInfo.binaryIndexes?.includes(index) && <BinaryBadge />}
           </div>
           <table className="table-auto w-full">
             <thead className={cn("bg-muted/50 text-foreground")}>
@@ -50,10 +53,10 @@ export default function KeyDetailsStream(
               {entry.value.map(([field, value], fieldIndex: number) => (
                 <tr key={fieldIndex}>
                   <td className={cn("py-3 px-4 border-b border-border text-foreground")}>
-                    <Typography variant="code">{field}</Typography>
+                    <BinaryValue isBinary={binaryParts.has(index, fieldIndex, "field")} value={field} />
                   </td>
                   <td className={cn("py-3 px-4 border-b border-border text-foreground")}>
-                    <Typography variant="code">{value}</Typography>
+                    <BinaryValue isBinary={binaryParts.has(index, fieldIndex, "value")} value={value} />
                   </td>
                 </tr>
               ))}

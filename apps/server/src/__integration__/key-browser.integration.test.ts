@@ -100,9 +100,7 @@ describe("integration / key browser", async () => {
     assert.equal(byField.get("name")?.value, "alice")
     assert.equal(byField.get("\\x80\\x81")?.value, "x")
     assert.equal(byField.get("blob")?.value, "\\xff")
-    assert.deepEqual(
-      [...(keyMsg.payload?.binaryIndexes ?? [])].sort(),
-      [byField.get("\\x80\\x81")?.index, byField.get("blob")?.index].sort(),
-    )
+    assert.deepEqual(keyMsg.payload?.binaryKeyIndexes, [byField.get("\\x80\\x81")?.index])
+    assert.deepEqual(keyMsg.payload?.binaryValueIndexes, [byField.get("blob")?.index])
   })
 })

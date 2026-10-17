@@ -6,10 +6,11 @@ import { Input } from "../../ui/input"
 import { EditActionButtons } from "../../ui/edit-action-buttons"
 import DeleteModal from "../../ui/delete-modal"
 import { Typography } from "../../ui/typography"
+import { BinaryNotice, BinaryValue } from "./binary-value"
+import { binaryIndexSet } from "./binary-indexes"
 import { useAppDispatch } from "@/hooks/hooks"
 import { updateKeyRequested } from "@/state/valkey-features/keys/keyBrowserSlice"
 import { cn } from "@/lib/utils"
-import { BinaryBadge } from "./binary-badge"
 
 interface KeyDetailsSetProps {
   selectedKey: string;
@@ -43,8 +44,7 @@ export default function KeyDetailsSet(
   const [deletedValues, setDeletedValues] = useState<Set<string>>(new Set())
   const [pendingDeleteValue, setPendingDeleteValue] = useState<string | null>(null)
   const [newItems, setNewItems] = useState<NewItem[]>([])
-  const binaryIndexes = new Set(selectedKeyInfo.binaryIndexes)
-  const allBinary = selectedKeyInfo.elements.length > 0 && binaryIndexes.size === selectedKeyInfo.elements.length
+  const binaryIndexes = binaryIndexSet(selectedKeyInfo.binaryIndexes)
 
   const handleEdit = () => {
     if (isEditable) {
@@ -142,8 +142,6 @@ export default function KeyDetailsSet(
           <Typography className="col-span-2 text-left" variant="label">Value</Typography>
           <div className="flex justify-end gap-1">
             <EditActionButtons
-              disabled={allBinary}
-              disabledTooltip="Binary members can't be edited as text"
               isEditable={isEditable}
               onEdit={handleEdit}
               onSave={handleSave}
@@ -151,6 +149,11 @@ export default function KeyDetailsSet(
             />
           </div>
         </div>
+        {binaryIndexes.size > 0 && (
+          <div className="px-4 pt-3">
+            <BinaryNotice count={binaryIndexes.size} noun="members" total={selectedKeyInfo.elements.length} />
+          </div>
+        )}
         {selectedKeyInfo.elements
           .map((element: string, index: number) => ({ element, index }))
           .filter(({ element }) => !deletedValues.has(element))
@@ -158,12 +161,7 @@ export default function KeyDetailsSet(
             <div className={cn("grid grid-cols-4 gap-4 py-3 px-4 border-b border-border text-foreground")} key={index}>
               <Typography variant="bodySm">{index}</Typography>
               <div className="col-span-3">
-                {binaryIndexes.has(index) ? (
-                  <div className="flex gap-2">
-                    <Typography variant="code">{element}</Typography>
-                    <BinaryBadge />
-                  </div>
-                ) : isEditable ? (
+                {isEditable && !binaryIndexes.has(index) ? (
                   <div className="flex gap-2 relative">
                     <Input
                       aria-label="Edit set value"
@@ -190,7 +188,7 @@ export default function KeyDetailsSet(
                     )}
                   </div>
                 ) : (
-                  <Typography variant="code">{String(element)}</Typography>
+                  <BinaryValue isBinary={binaryIndexes.has(index)} value={element} />
                 )}
               </div>
             </div>

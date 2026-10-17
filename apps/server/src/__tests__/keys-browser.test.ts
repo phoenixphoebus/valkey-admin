@@ -197,7 +197,7 @@ describe("getKeyInfo", () => {
   })
 
   describe("binary collection elements", () => {
-    it("should escape binary hash fields and values while keeping text fields", async () => {
+    it("should flag binary hash field names and values separately while keeping text fields", async () => {
       const mockClient = createMockClient({
         TYPE: "hash",
         TTL: -1,
@@ -218,10 +218,12 @@ describe("getKeyInfo", () => {
         { key: "\\x80\\x81", value: "v" },
         { key: "blob", value: "\\xff\\x00" },
       ])
-      assert.deepStrictEqual(result.binaryIndexes, [1, 2])
+      assert.deepStrictEqual(result.binaryKeyIndexes, [1])
+      assert.deepStrictEqual(result.binaryValueIndexes, [2])
+      assert.strictEqual(result.binaryIndexes, undefined)
     })
 
-    it("should omit binaryIndexes and dedupe repeated SCAN fields for text-only hashes", async () => {
+    it("should omit binary indexes and dedupe repeated SCAN fields for text-only hashes", async () => {
       const mockClient = createMockClient({
         TYPE: "hash",
         TTL: -1,
@@ -233,7 +235,8 @@ describe("getKeyInfo", () => {
       const result = await getKeyInfo(mockClient as any, "myhash")
 
       assert.deepStrictEqual(result.elements, [{ key: "f", value: "v" }])
-      assert.strictEqual(result.binaryIndexes, undefined)
+      assert.strictEqual(result.binaryKeyIndexes, undefined)
+      assert.strictEqual(result.binaryValueIndexes, undefined)
     })
 
     it("should escape binary set members", async () => {
@@ -284,7 +287,7 @@ describe("getKeyInfo", () => {
       assert.deepStrictEqual(result.binaryIndexes, [1])
     })
 
-    it("should escape binary stream values and flag the entry", async () => {
+    it("should escape binary stream fields and values and locate each one", async () => {
       const mockClient = createMockClient({
         TYPE: "stream",
         TTL: -1,
@@ -292,7 +295,10 @@ describe("getKeyInfo", () => {
         XLEN: 2,
         XRANGE: [
           { key: Buffer.from("1-0"), value: [[Buffer.from("name"), Buffer.from("bob")]] },
-          { key: Buffer.from("2-0"), value: [[Buffer.from("payload"), Buffer.from([0x89, 0x50])]] },
+          { key: Buffer.from("2-0"), value: [
+            [Buffer.from("payload"), Buffer.from([0x89, 0x50])],
+            [Buffer.from([0xff]), Buffer.from("text")],
+          ] },
         ],
       })
 
@@ -300,9 +306,13 @@ describe("getKeyInfo", () => {
 
       assert.deepStrictEqual(result.elements, [
         { key: "1-0", value: [["name", "bob"]] },
-        { key: "2-0", value: [["payload", "\\x89P"]] },
+        { key: "2-0", value: [["payload", "\\x89P"], ["\\xff", "text"]] },
       ])
-      assert.deepStrictEqual(result.binaryIndexes, [1])
+      assert.deepStrictEqual(result.binaryStreamParts, [
+        { entry: 1, field: 0, part: "value" },
+        { entry: 1, field: 1, part: "field" },
+      ])
+      assert.strictEqual(result.binaryIndexes, undefined)
     })
   })
 
@@ -988,6 +998,59 @@ describe("updateKey", () => {
         (call: any) => ["SET", "SETEX"].includes(call.arguments[0][0]),
       )
       assert.strictEqual(writes.length, 0)
+    })
+  })
+
+  describe("hash keys", () => {
+    it("refuses to overwrite fields holding binary data and issues no write", async () => {
+      const mockClient = {
+        customCommand: mock.fn(async (cmd: string[]) =>
+          cmd[0] === "HMGET" ? [Buffer.from("text"), Buffer.from([0xff, 0xfe]), null] : null,
+        ),
+      }
+      const { mockWs: ws, messages } = createMockWs()
+
+      await updateKey(mockClient as any, ws as any, {
+        connectionId: "conn-123",
+        key: "myhash",
+        keyType: "hash",
+        fields: [
+          { field: "name", value: "a" },
+          { field: "blob", value: "b" },
+          { field: "new", value: "c" },
+        ],
+      })
+
+      const failed = getMessageOfType(messages, VALKEY.KEYS.updateKeyFailed)
+      assert.strictEqual(failed.payload.error, "Fields blob hold binary data and cannot be edited as text.")
+      const writes = mockClient.customCommand.mock.calls.filter(
+        (call: any) => ["HSET", "HDEL"].includes(call.arguments[0][0]),
+      )
+      assert.strictEqual(writes.length, 0)
+    })
+  })
+
+  describe("list keys", () => {
+    it("refuses to overwrite elements holding binary data and issues no write", async () => {
+      const exec = mock.fn(async () => [])
+      const mockClient = {
+        customCommand: mock.fn(async (cmd: string[]) =>
+          cmd[0] === "LINDEX" && cmd[2] === "1" ? Buffer.from([0x80, 0x00]) : Buffer.from("text"),
+        ),
+        exec,
+      }
+      const { mockWs: ws, messages } = createMockWs()
+
+      await updateKey(mockClient as any, ws as any, {
+        connectionId: "conn-123",
+        key: "mylist",
+        keyType: "list",
+        listUpdates: [{ index: 0, value: "a" }, { index: 1, value: "b" }],
+      })
+
+      const failed = getMessageOfType(messages, VALKEY.KEYS.updateKeyFailed)
+      assert.strictEqual(failed.payload.error, "Elements at index 1 hold binary data and cannot be edited as text.")
+      assert.strictEqual(exec.mock.calls.length, 0)
     })
   })
 })

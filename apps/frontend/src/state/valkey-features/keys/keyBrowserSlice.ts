@@ -11,6 +11,9 @@ interface KeyInfo {
   elementsWarning?: string;
   isBinary?: boolean;
   binaryIndexes?: number[];
+  binaryKeyIndexes?: number[];
+  binaryValueIndexes?: number[];
+  binaryStreamParts?: { entry: number; field: number; part: "field" | "value" }[];
 }
 
 interface KeyBrowserState {

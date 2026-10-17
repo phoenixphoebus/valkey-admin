@@ -6,10 +6,11 @@ import { Input } from "../../ui/input"
 import { EditActionButtons } from "../../ui/edit-action-buttons"
 import DeleteModal from "../../ui/delete-modal"
 import { Typography } from "../../ui/typography"
+import { BinaryNotice, BinaryValue } from "./binary-value"
+import { binaryIndexSet } from "./binary-indexes"
 import { useAppDispatch } from "@/hooks/hooks"
 import { updateKeyRequested } from "@/state/valkey-features/keys/keyBrowserSlice"
 import { cn } from "@/lib/utils"
-import { BinaryBadge } from "./binary-badge"
 
 interface ElementInfo {
   key: string;
@@ -25,7 +26,8 @@ interface KeyDetailsHashProps {
     size: number;
     collectionSize?: number;
     elements: ElementInfo[];
-    binaryIndexes?: number[];
+    binaryKeyIndexes?: number[];
+    binaryValueIndexes?: number[];
   };
   connectionId: string;
   readOnly:boolean;
@@ -38,7 +40,8 @@ interface NewField {
 }
 
 /**
- * Shows and edits a hash's fields; fields with binary data are badged and read-only.
+ * Shows and edits a hash's fields. Binary field names and values are badged and read-only;
+ * a text field holding a binary value can still be deleted by name.
  */
 export default function KeyDetailsHash(
   { selectedKey, selectedKeyInfo, connectionId, readOnly = false }: KeyDetailsHashProps,
@@ -49,8 +52,10 @@ export default function KeyDetailsHash(
   const [deletedHashFields, setDeletedHashFields] = useState<Set<string>>(new Set())
   const [pendingDeleteField, setPendingDeleteField] = useState<string | null>(null)
   const [newFields, setNewFields] = useState<NewField[]>([])
-  const binaryIndexes = new Set(selectedKeyInfo.binaryIndexes)
-  const allBinary = selectedKeyInfo.elements.length > 0 && binaryIndexes.size === selectedKeyInfo.elements.length
+  const binaryKeyIndexes = binaryIndexSet(selectedKeyInfo.binaryKeyIndexes)
+  const binaryValueIndexes = binaryIndexSet(selectedKeyInfo.binaryValueIndexes)
+  const binaryFieldCount = new Set([...binaryKeyIndexes, ...binaryValueIndexes]).size
+  const isTextField = (index: number) => !binaryKeyIndexes.has(index) && !binaryValueIndexes.has(index)
 
   const handleEdit = () => {
     if (isEditable) {
@@ -64,7 +69,7 @@ export default function KeyDetailsHash(
       const initialHashValue: { [key: string]: string } = {}
       // Binary fields are left out so saving never writes their escaped text back as a new field
       selectedKeyInfo.elements.forEach((element: ElementInfo, index: number) => {
-        if (!binaryIndexes.has(index)) initialHashValue[element.key] = element.value
+        if (isTextField(index)) initialHashValue[element.key] = element.value
       })
       setEditedHashValue(initialHashValue)
       setDeletedHashFields(new Set())
@@ -74,9 +79,11 @@ export default function KeyDetailsHash(
   }
 
   const handleSave = () => {
-    // combine existing edited fields and new fields
+    const originalValues = new Map(selectedKeyInfo.elements.map((element: ElementInfo) => [element.key, element.value]))
+    // combine changed existing fields and new fields; unchanged fields are not sent, so a field that
+    // turned binary after the key loaded is never overwritten unless the user edited it
     const existingFields = Object.entries(editedHashValue)
-      .filter(([field]) => !deletedHashFields.has(field))
+      .filter(([field, value]) => !deletedHashFields.has(field) && value !== originalValues.get(field))
       .map(([field, value]) => ({
         field,
         value,
@@ -90,13 +97,17 @@ export default function KeyDetailsHash(
         value: nf.value,
       }))
 
-    dispatch(updateKeyRequested({
-      connectionId: connectionId,
-      key: selectedKey,
-      keyType: "hash",
-      fields: [...existingFields, ...newFieldsToAdd],
-      deletedHashFields: Array.from(deletedHashFields),
-    }))
+    const fields = [...existingFields, ...newFieldsToAdd]
+    // Nothing changed: the server rejects an update with no fields, so just leave edit mode
+    if (fields.length > 0 || deletedHashFields.size > 0) {
+      dispatch(updateKeyRequested({
+        connectionId: connectionId,
+        key: selectedKey,
+        keyType: "hash",
+        fields,
+        deletedHashFields: Array.from(deletedHashFields),
+      }))
+    }
     setIsEditable(false)
     setEditedHashValue({})
     setDeletedHashFields(new Set())
@@ -158,8 +169,6 @@ export default function KeyDetailsHash(
           <Typography className="col-span-2 text-left" variant="label">Value</Typography>
           <div className="flex justify-end gap-1">
             <EditActionButtons
-              disabled={allBinary}
-              disabledTooltip="Binary fields can't be edited as text"
               isEditable={isEditable}
               onEdit={handleEdit}
               onSave={handleSave}
@@ -167,26 +176,30 @@ export default function KeyDetailsHash(
             />
           </div>
         </div>
+        {binaryFieldCount > 0 && (
+          <div className="px-4 pt-3">
+            <BinaryNotice count={binaryFieldCount} noun="fields" total={selectedKeyInfo.elements.length} />
+          </div>
+        )}
         {selectedKeyInfo.elements
           .map((element: ElementInfo, index: number) => ({ element, index }))
           .filter(({ element }) => !deletedHashFields.has(element.key))
           .map(({ element, index }) => (
             <div className={cn("grid grid-cols-4 gap-4 py-3 px-4 border-b border-border text-foreground")} key={index}>
-              <Typography variant="code">{element.key}</Typography>
+              <BinaryValue isBinary={binaryKeyIndexes.has(index)} value={element.key} />
               <div className="col-span-3">
-                {binaryIndexes.has(index) ? (
-                  <div className="flex gap-2">
-                    <Typography variant="code">{element.value}</Typography>
-                    <BinaryBadge />
-                  </div>
-                ) : isEditable ? (
+                {isEditable && !binaryKeyIndexes.has(index) ? (
                   <div className="flex gap-2 relative">
-                    <Input
-                      aria-label="Edit hash field value"
-                      onChange={(e) => handleHashFieldChange(element.key, e.target.value)}
-                      type="text"
-                      value={editedHashValue[element.key] || ""}
-                    />
+                    {binaryValueIndexes.has(index) ? (
+                      <BinaryValue className="flex-1" isBinary value={element.value} />
+                    ) : (
+                      <Input
+                        aria-label="Edit hash field value"
+                        onChange={(e) => handleHashFieldChange(element.key, e.target.value)}
+                        type="text"
+                        value={editedHashValue[element.key] || ""}
+                      />
+                    )}
                     <CustomTooltip content="Delete field">
                       <Button
                         aria-label="Delete field"
@@ -206,7 +219,7 @@ export default function KeyDetailsHash(
                     )}
                   </div>
                 ) : (
-                  <Typography variant="code">{element.value}</Typography>
+                  <BinaryValue isBinary={binaryValueIndexes.has(index)} value={element.value} />
                 )}
               </div>
             </div>

@@ -2,10 +2,11 @@ import { useState } from "react"
 import { Input } from "../../ui/input"
 import { EditActionButtons } from "../../ui/edit-action-buttons"
 import { Typography } from "../../ui/typography"
+import { BinaryNotice, BinaryValue } from "./binary-value"
+import { binaryIndexSet } from "./binary-indexes"
 import { useAppDispatch } from "@/hooks/hooks"
 import { updateKeyRequested } from "@/state/valkey-features/keys/keyBrowserSlice"
 import { cn } from "@/lib/utils"
-import { BinaryBadge } from "./binary-badge"
 
 interface ZSetElement {
   key: string;
@@ -36,8 +37,7 @@ export default function KeyDetailsZSet(
   const dispatch = useAppDispatch()
   const [isEditable, setIsEditable] = useState(false)
   const [editedValues, setEditedValues] = useState<number[]>([])
-  const binaryIndexes = new Set(selectedKeyInfo.binaryIndexes)
-  const allBinary = selectedKeyInfo.elements.length > 0 && binaryIndexes.size === selectedKeyInfo.elements.length
+  const binaryIndexes = binaryIndexSet(selectedKeyInfo.binaryIndexes)
 
   console.debug("selectedKeyInfo:::", selectedKeyInfo)
 
@@ -89,8 +89,6 @@ export default function KeyDetailsZSet(
           <Typography className="col-span-2 text-left" variant="label">Value</Typography>
           <div className="flex justify-end gap-1">
             <EditActionButtons
-              disabled={allBinary}
-              disabledTooltip="Binary members can't be edited as text"
               isEditable={isEditable}
               onEdit={handleEdit}
               onSave={handleSave}
@@ -98,12 +96,14 @@ export default function KeyDetailsZSet(
             />
           </div>
         </div>
+        {binaryIndexes.size > 0 && (
+          <div className="px-4 pt-3">
+            <BinaryNotice count={binaryIndexes.size} noun="members" total={selectedKeyInfo.elements.length} />
+          </div>
+        )}
         {selectedKeyInfo.elements.map((element: ZSetElement, index: number) => (
           <div className={cn("grid grid-cols-4 gap-4 py-3 px-4 border-b border-border text-foreground")} key={index}>
-            <div className="flex gap-2">
-              <Typography variant="code">{element.key}</Typography>
-              {binaryIndexes.has(index) && <BinaryBadge />}
-            </div>
+            <BinaryValue isBinary={binaryIndexes.has(index)} value={element.key} />
             <div className="col-span-3">
               {isEditable && !binaryIndexes.has(index) ? (
                 <Input

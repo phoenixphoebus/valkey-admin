@@ -1,12 +1,13 @@
-import { InfoChip } from "../../ui/info-chip"
+import { Badge } from "../../ui/badge"
 
 /**
- * Marks a collection element whose bytes aren't valid UTF-8; the server sends it escaped (\xNN).
+ * Marks a key part whose bytes aren't valid UTF-8; the server sends it escaped (\xNN). The per-key
+ * BinaryNotice explains what that means, so the badge itself carries no tooltip.
  */
 export function BinaryBadge() {
   return (
-    <InfoChip className="shrink-0 self-center" tooltip="Binary data, shown escaped. It can't be edited as text.">
+    <Badge className="shrink-0 self-start text-[10px] px-2 py-0" variant="secondary">
       binary
-    </InfoChip>
+    </Badge>
   )
 }
