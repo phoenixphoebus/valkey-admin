@@ -55,7 +55,7 @@ function stringKey(name = key) {
 const renderStringKey = () => render(stringKey())
 
 /** Answers the last raw value request the way the server would. */
-function replyWithStoredValue(overrides: { maxOutputBytes?: number } = {}) {
+function replyWithStoredValue(overrides: { maxOutputBytes?: number; previewMaxBytes?: number } = {}) {
   const request = sent[sent.length - 1]
   act(() => {
     store.dispatch(rawValueFulfilled({
@@ -65,7 +65,7 @@ function replyWithStoredValue(overrides: { maxOutputBytes?: number } = {}) {
       base64: stored.toString("base64"),
       byteLength: stored.length,
       maxOutputBytes: overrides.maxOutputBytes ?? 10 * 1024 * 1024,
-      previewMaxBytes: 1024 * 1024,
+      previewMaxBytes: overrides.previewMaxBytes ?? 1024 * 1024,
     }))
   })
 }
@@ -157,7 +157,38 @@ describe("KeyDecompression", () => {
     expect(sent[1].payload).toMatchObject({ codecChoice: "gzip", outputLimit: 20, previewStart: 10 })
 
     replyWithStoredValue({ maxOutputBytes: 10 })
-    expect(await screen.findByText("Showing bytes 10–20 of 20, the newly decoded part.")).toBeInTheDocument()
+    expect(await screen.findByText("Showing bytes 10–20 of 20.")).toBeInTheDocument()
     expect(screen.getByTestId("decompressed-value").textContent).toBe("da\",\"roles")
+  })
+
+  it("pages through decoded output larger than the preview before decoding further", async () => {
+    const user = userEvent.setup()
+    renderStringKey()
+
+    await user.click(screen.getByRole("button", { name: "Decompress" }))
+    replyWithStoredValue({ maxOutputBytes: 20, previewMaxBytes: 10 })
+
+    expect(await screen.findByText("Showing the first 10 B of 20 B.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Continue/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Show from byte 10" }))
+    expect(sent[1].payload).toMatchObject({ codecChoice: "gzip", outputLimit: 20, previewStart: 10 })
+
+    replyWithStoredValue({ maxOutputBytes: 20, previewMaxBytes: 10 })
+    expect(await screen.findByText("Showing bytes 10–20 of 20.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Show from byte/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Continue to 40 B" })).toBeInTheDocument()
+  })
+
+  it("pages through complete output larger than the preview", async () => {
+    const user = userEvent.setup()
+    renderStringKey()
+
+    await user.click(screen.getByRole("button", { name: "Decompress" }))
+    replyWithStoredValue({ previewMaxBytes: 20 })
+
+    expect(await screen.findByText(/Showing the first 20 B of/)).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Show from byte 20" }))
+    expect(sent[1].payload).toMatchObject({ codecChoice: "gzip", outputLimit: 10 * 1024 * 1024, previewStart: 20 })
   })
 })

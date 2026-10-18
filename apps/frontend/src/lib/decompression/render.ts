@@ -10,9 +10,9 @@ export type DecompressedPreview = {
   previewTruncated: boolean;
 }
 
-// A hex dump line shows 16 bytes in about 80 characters.
-const HEX_CHARS_PER_BYTE = 5
 const HEX_BYTES_PER_LINE = 16
+// A hex dump line holding n bytes is this many characters plus n: offset, padded hex column and ASCII column borders.
+const HEX_LINE_OVERHEAD = 8 + 2 + (HEX_BYTES_PER_LINE * 3 - 1) + 2 + 2
 // C0 controls other than tab, line feed, form feed and carriage return, plus DEL. NUL bytes are valid UTF-8 but render
 // as nothing, so text containing these is shown as hex.
 // eslint-disable-next-line no-control-regex
@@ -67,6 +67,15 @@ function hexDump(bytes: Uint8Array, baseOffset: number): string {
   return lines.join("\n")
 }
 
+/** How many bytes a hex dump can show within `maxChars` characters, newlines included. */
+function hexBytesWithin(maxChars: number): number {
+  const fullLineChars = HEX_LINE_OVERHEAD + HEX_BYTES_PER_LINE + 1
+  // The last line has no newline.
+  const fullLines = Math.floor((maxChars + 1) / fullLineChars)
+  const partialLineChars = maxChars - fullLines * fullLineChars + (fullLines === 0 ? 1 : 0)
+  return fullLines * HEX_BYTES_PER_LINE + Math.max(0, partialLineChars - HEX_LINE_OVERHEAD)
+}
+
 /**
  * Picks how decoded bytes are shown, limited to `previewMaxBytes` of rendered UTF-8 starting at `previewStart`:
  * pretty JSON, UTF-8 text, or a hex dump (also used for control characters). The view is chosen from the shown bytes.
@@ -98,7 +107,7 @@ export function renderDecompressed(
     }
   }
 
-  const hexEnd = Math.min(output.length, start + Math.floor(previewMaxBytes / HEX_CHARS_PER_BYTE))
+  const hexEnd = Math.min(output.length, start + hexBytesWithin(previewMaxBytes))
   return {
     view: "hex",
     preview: hexDump(output.subarray(start, hexEnd), start),

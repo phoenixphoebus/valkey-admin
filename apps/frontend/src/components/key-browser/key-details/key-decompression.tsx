@@ -24,8 +24,14 @@ interface KeyDecompressionProps {
   actionLabel?: string;
 }
 
-function DecompressedValue({ result, onContinue }: { result: DecompressionResult; onContinue: () => void }) {
+function DecompressedValue({ result, onPage }: {
+  result: DecompressionResult;
+  onPage: (page: { outputLimit: number; previewStart: number }) => void;
+}) {
   const label = COMPRESSION_CODEC_LABELS[result.codec]
+  const previewEnd = result.previewStart + result.previewBytes
+  // Decoded output past the preview is shown before decoding further.
+  const morePreview = result.previewBytes > 0 && previewEnd < result.outputBytes
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2 flex-wrap">
@@ -45,9 +51,19 @@ function DecompressedValue({ result, onContinue }: { result: DecompressionResult
               {result.declaredSize !== undefined && ` of ${formatBytes(result.declaredSize)}`}.
               {result.view !== "hex" && " Truncated output is shown as plain text."}
             </span>
-            <Button className="mt-1 w-fit" onClick={onContinue} size="sm" variant="outline">
-              Continue to {formatBytes(result.outputLimit + result.maxOutputBytes)}
-            </Button>
+            {!morePreview && (
+              // Preview from the previous limit, so the newly decoded output is what's shown.
+              <Button
+                className="mt-1 w-fit"
+                onClick={() => onPage({
+                  outputLimit: result.outputLimit + result.maxOutputBytes, previewStart: result.outputLimit,
+                })}
+                size="sm"
+                variant="outline"
+              >
+                Continue to {formatBytes(result.outputLimit + result.maxOutputBytes)}
+              </Button>
+            )}
           </AlertDescription>
         </Alert>
       )}
@@ -57,8 +73,19 @@ function DecompressedValue({ result, onContinue }: { result: DecompressionResult
           {result.previewStart === 0
             ? `Showing the first ${formatBytes(result.previewBytes)} of ${formatBytes(result.outputBytes)}.`
             : `Showing bytes ${result.previewStart.toLocaleString()}–${(result.previewStart + result.previewBytes).toLocaleString()}`
-              + ` of ${result.outputBytes.toLocaleString()}, the newly decoded part.`}
+              + ` of ${result.outputBytes.toLocaleString()}.`}
         </Typography>
+      )}
+
+      {morePreview && (
+        <Button
+          className="w-fit"
+          onClick={() => onPage({ outputLimit: result.outputLimit, previewStart: previewEnd })}
+          size="sm"
+          variant="outline"
+        >
+          Show from byte {previewEnd.toLocaleString()}
+        </Button>
       )}
 
       <Typography
@@ -128,13 +155,7 @@ export default function KeyDecompression({ connectionId, keyName, actionLabel = 
 
       {entry?.status === "decoded" && entry.result && (
         <DecompressedValue
-          onContinue={() => {
-            const { codec, outputLimit, maxOutputBytes } = entry.result!
-            // Preview from the previous limit, so the newly decoded output is what's shown.
-            dispatch(rawValueRequested({
-              ...target, codecChoice: codec, outputLimit: outputLimit + maxOutputBytes, previewStart: outputLimit,
-            }))
-          }}
+          onPage={(page) => dispatch(rawValueRequested({ ...target, codecChoice: entry.result!.codec, ...page }))}
           result={entry.result}
         />
       )}

@@ -277,6 +277,15 @@ describe("renderDecompressed", () => {
     expect(result.preview).toBe("00000020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  |................|")
   })
 
+  it("keeps a hex preview with a partial last line within the preview limit", () => {
+    // One full 77-character line, a newline, then a 61-character line with 6 bytes.
+    const result = renderDecompressed(new Uint8Array(100), { truncated: false, previewMaxBytes: 145 })
+    expect(result).toMatchObject({ view: "hex", previewStart: 0, previewBytes: 22, previewTruncated: true })
+    expect(result.preview.split("\n")[1]).toBe("00000010  00 00 00 00 00 00                                |......|")
+    expect(result.preview.length).toBe(145)
+    expect(renderDecompressed(new Uint8Array(100), { truncated: false, previewMaxBytes: 144 }).previewBytes).toBe(21)
+  })
+
   it("shows plain text and JSON-looking scalars as text", () => {
     expect(renderDecompressed(encode("true"), { truncated: false, previewMaxBytes: MiB }).view).toBe("text")
     expect(renderDecompressed(encode("hello"), { truncated: false, previewMaxBytes: MiB }).view).toBe("text")
