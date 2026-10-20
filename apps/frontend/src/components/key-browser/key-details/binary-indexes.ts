@@ -1,10 +1,3 @@
-/**
- * The server lists binary element indexes only when there are some; this turns them into a lookup set.
- */
-export function binaryIndexSet(indexes?: number[]): Set<number> {
-  return new Set(indexes)
-}
-
 export interface BinaryStreamPart {
   entry: number;
   field: number;

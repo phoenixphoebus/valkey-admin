@@ -7,7 +7,6 @@ import { EditActionButtons } from "../../ui/edit-action-buttons"
 import DeleteModal from "../../ui/delete-modal"
 import { Typography } from "../../ui/typography"
 import { BinaryNotice, BinaryValue } from "./binary-value"
-import { binaryIndexSet } from "./binary-indexes"
 import { useAppDispatch } from "@/hooks/hooks"
 import { updateKeyRequested } from "@/state/valkey-features/keys/keyBrowserSlice"
 import { cn } from "@/lib/utils"
@@ -44,7 +43,7 @@ export default function KeyDetailsList(
   const [deletedIndices, setDeletedIndices] = useState<Set<number>>(new Set())
   const [pendingDeleteIndex, setPendingDeleteIndex] = useState<number | null>(null)
   const [newItems, setNewItems] = useState<NewItem[]>([])
-  const binaryIndexes = binaryIndexSet(selectedKeyInfo.binaryIndexes)
+  const binaryIndexes = new Set(selectedKeyInfo.binaryIndexes)
 
   const handleEdit = () => {
     if (isEditable) {

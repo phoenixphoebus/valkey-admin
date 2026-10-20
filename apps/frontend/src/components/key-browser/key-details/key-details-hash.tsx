@@ -7,7 +7,6 @@ import { EditActionButtons } from "../../ui/edit-action-buttons"
 import DeleteModal from "../../ui/delete-modal"
 import { Typography } from "../../ui/typography"
 import { BinaryNotice, BinaryValue } from "./binary-value"
-import { binaryIndexSet } from "./binary-indexes"
 import { useAppDispatch } from "@/hooks/hooks"
 import { updateKeyRequested } from "@/state/valkey-features/keys/keyBrowserSlice"
 import { cn } from "@/lib/utils"
@@ -52,8 +51,8 @@ export default function KeyDetailsHash(
   const [deletedHashFields, setDeletedHashFields] = useState<Set<string>>(new Set())
   const [pendingDeleteField, setPendingDeleteField] = useState<string | null>(null)
   const [newFields, setNewFields] = useState<NewField[]>([])
-  const binaryKeyIndexes = binaryIndexSet(selectedKeyInfo.binaryKeyIndexes)
-  const binaryValueIndexes = binaryIndexSet(selectedKeyInfo.binaryValueIndexes)
+  const binaryKeyIndexes = new Set(selectedKeyInfo.binaryKeyIndexes)
+  const binaryValueIndexes = new Set(selectedKeyInfo.binaryValueIndexes)
   const binaryFieldCount = new Set([...binaryKeyIndexes, ...binaryValueIndexes]).size
   const isTextField = (index: number) => !binaryKeyIndexes.has(index) && !binaryValueIndexes.has(index)
 

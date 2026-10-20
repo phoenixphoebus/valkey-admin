@@ -1,6 +1,6 @@
 import { TriangleAlert } from "lucide-react"
+import { Badge } from "../../ui/badge"
 import { Typography } from "../../ui/typography"
-import { BinaryBadge } from "./binary-badge"
 import { cn } from "@/lib/utils"
 
 interface BinaryValueProps {
@@ -17,7 +17,9 @@ export function BinaryValue({ value, isBinary, className }: BinaryValueProps) {
   return (
     <div className={cn("flex gap-2 min-w-0", className)}>
       <Typography className="break-all min-w-0" variant="code">{value}</Typography>
-      <BinaryBadge />
+      <Badge className="shrink-0 self-start text-[10px] px-2 py-0" variant="secondary">
+        binary
+      </Badge>
     </div>
   )
 }

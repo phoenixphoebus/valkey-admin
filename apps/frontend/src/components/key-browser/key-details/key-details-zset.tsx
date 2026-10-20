@@ -3,7 +3,6 @@ import { Input } from "../../ui/input"
 import { EditActionButtons } from "../../ui/edit-action-buttons"
 import { Typography } from "../../ui/typography"
 import { BinaryNotice, BinaryValue } from "./binary-value"
-import { binaryIndexSet } from "./binary-indexes"
 import { useAppDispatch } from "@/hooks/hooks"
 import { updateKeyRequested } from "@/state/valkey-features/keys/keyBrowserSlice"
 import { cn } from "@/lib/utils"
@@ -37,7 +36,7 @@ export default function KeyDetailsZSet(
   const dispatch = useAppDispatch()
   const [isEditable, setIsEditable] = useState(false)
   const [editedValues, setEditedValues] = useState<number[]>([])
-  const binaryIndexes = binaryIndexSet(selectedKeyInfo.binaryIndexes)
+  const binaryIndexes = new Set(selectedKeyInfo.binaryIndexes)
 
   console.debug("selectedKeyInfo:::", selectedKeyInfo)
 
